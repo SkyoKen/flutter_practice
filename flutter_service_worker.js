@@ -14,7 +14,7 @@ const RESOURCES = {"assets/lib/images/logo.jpg": "a3aed9a6217e451f0ad18ec0c8e05c
 "assets/packages/cupertino_icons/assets/CupertinoIcons.ttf": "e986ebe42ef785b27164c36a9abc7818",
 "version.json": "f87e4c94597958d2930a763a16a7e3e0",
 "manifest.json": "2d2d5a4c60aa9fb171f8cd80a20d7bdf",
-"flutter_bootstrap.js": "4f61ee05bd2f0c570158aea3fedee348",
+"flutter_bootstrap.js": "06c81b399eb99e3296f60c07df2bfca1",
 "canvaskit/skwasm.worker.js": "89990e8c92bcb123999aa81f7e203b1c",
 "canvaskit/skwasm.wasm": "828c26a0b1cc8eb1adacbdd0c5e8bcfa",
 "canvaskit/canvaskit.wasm": "e7602c687313cfac5f495c5eac2fb324",
