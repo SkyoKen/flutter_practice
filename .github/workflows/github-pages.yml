@@ -19,7 +19,7 @@ jobs:
         id: version
         run: |
           REPOSITORY=$(echo ${{ github.repository }} | sed -e "s#.*/##")
-          echo ::set-output name=repository::$REPOSITORY
+          echo "repository=$REPOSITORY" >> $GITHUB_ENV
       - name: Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -28,10 +28,18 @@ jobs:
           cache: true
       - run: flutter --version
       - run: flutter pub get
-      - run: flutter build web --web-renderer html --base-href /${{ steps.version.outputs.repository }}/
+      - run: flutter build web --web-renderer html --base-href /${{ github.repository }}/
 
+      - name: Check ACCESS_TOKEN
+        run: |
+          if [ -z "${{ secrets.ACCESS_TOKEN }}" ]; then
+            echo "ACCESS_TOKEN is not set or is empty!"
+            exit 1  # 退出工作流，表示令牌没有正确设置
+          else
+            echo "ACCESS_TOKEN is set."
+          fi
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.ACCESS_TOKEN }}
           publish_dir: ./build/web
