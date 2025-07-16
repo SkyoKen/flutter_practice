@@ -2,7 +2,7 @@ name: github pages
 
 on:
   push:
-    branches: [feature/publish_to_github_pages]
+    branches: [build]
 
   workflow_dispatch:
 
