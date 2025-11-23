@@ -1,28 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/models/cart.dart';
+import 'package:test_app/models/restaurant.dart';
 import 'package:test_app/pages/intro_page.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  // This widget is the root of your application.
-  @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) => Cart(),
-      builder: (context, child) => const MaterialApp(
+      create: (context) => Restaurant(),
+      builder: (context, child) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: IntroPage(),
+        theme: ThemeData(
+          primarySwatch: Colors.deepOrange, // 餐饮常用暖色调
+          scaffoldBackgroundColor: Colors.grey[200],
+        ),
+        home: const IntroPage(),
       ),
     );
   }
