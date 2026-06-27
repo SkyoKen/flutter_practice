@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cyber_table_order/components/food_tile.dart';
+import 'package:cyber_table_order/components/customer_arrival_stage.dart';
+import 'package:cyber_table_order/components/game_status_bar.dart';
+import 'package:cyber_table_order/components/kitchen_rush_panel.dart';
 import 'package:cyber_table_order/components/order_history_dialog.dart';
 import 'package:cyber_table_order/components/themed_app_dialog.dart';
 import 'package:cyber_table_order/models/food.dart';
+import 'package:cyber_table_order/models/game_controller.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
@@ -16,67 +21,46 @@ class MenuPage extends StatefulWidget {
 }
 
 class _MenuPageState extends State<MenuPage> {
-  String _selectedCategory = "popular";
-  String _selectedSubCategoryTag = "";
+  Timer? _businessTimer;
+  DateTime _lastBusinessTickAt = DateTime.now();
+  int _recentCompletedOrders = 0;
+  int _coinBurstSeed = 0;
 
-  final List<Map<String, String>> _categories = [
-    {"id": "popular", "key": "popular"},
-    {"id": "fish", "key": "seafood"},
-    {"id": "meat", "key": "meat"},
-    {"id": "beer", "key": "drinks"},
-    {"id": "side", "key": "sides"},
-    {"id": "bento", "key": "bento"},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _businessTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _runBusinessTick(),
+    );
+  }
 
-  final Map<String, List<Map<String, String>>> _subCategoryMap = {
-    "fish": [
-      {"id": "fish", "key": "all_fish"},
-      {"id": "salmon", "key": "salmon"},
-      {"id": "mackerel", "key": "mackerel"},
-      {"id": "tuna", "key": "tuna"},
-      {"id": "red_fish", "key": "red_fish"},
-      {"id": "seasonal", "key": "seasonal"},
-    ],
-    "meat": [
-      {"id": "meat", "key": "all_meat"},
-      {"id": "beef", "key": "beef"},
-      {"id": "pork", "key": "pork"},
-      {"id": "chicken", "key": "chicken"},
-    ],
-    "popular": [
-      {"id": "popular", "key": "all_popular"},
-    ],
-    "noodles": [
-      {"id": "noodles", "key": "all_noodles"},
-    ],
-    "side": [
-      {"id": "side", "key": "all_sides"},
-    ],
-    "bento": [
-      {"id": "bento", "key": "all_bento"},
-    ],
-  };
+  @override
+  void dispose() {
+    _businessTimer?.cancel();
+    super.dispose();
+  }
 
-  void _onMainCategoryTap(String categoryId) {
+  Future<void> _runBusinessTick() async {
+    if (!mounted) return;
+    final game = context.read<GameController>();
+    if (!game.isLoaded) return;
+    final restaurant = context.read<Restaurant>();
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastBusinessTickAt);
+    _lastBusinessTickAt = now;
+    final completed = await game.simulateBusinessTick(
+      restaurant.getMenu().map((food) => food.id).toList(),
+      elapsed: elapsed,
+      now: now,
+    );
+    if (!mounted || completed <= 0) return;
     setState(() {
-      _selectedCategory = categoryId;
-      _selectedSubCategoryTag = "";
+      _recentCompletedOrders = completed;
+      _coinBurstSeed += 1;
     });
   }
 
-  void _onSubCategoryTap(String subTag) {
-    setState(() {
-      if (subTag == _selectedCategory || subTag == _selectedSubCategoryTag) {
-        _selectedSubCategoryTag = "";
-      } else {
-        _selectedSubCategoryTag = subTag;
-      }
-    });
-  }
-
-  // ----------------------------------------------------------------------
-  // 历史记录弹窗
-  // ----------------------------------------------------------------------
   void _showHistoryLog(BuildContext context, Restaurant restaurant) {
     showDialog(
       context: context,
@@ -84,1690 +68,805 @@ class _MenuPageState extends State<MenuPage> {
     );
   }
 
-  // ----------------------------------------------------------------------
-  // 结账确认弹窗
-  // ----------------------------------------------------------------------
-  void _requestBill(BuildContext context, Restaurant restaurant) {
-    final List<Map<String, dynamic>> history = restaurant.getOrderHistory();
-    final bool hasItemsInCart = restaurant.getUniqueCartItems().isNotEmpty;
-
-    // 计算历史总金额
-    double grandTotal = 0.0;
-    for (var order in history) {
-      grandTotal += double.tryParse(order['totalPrice']!) ?? 0.0;
-    }
-
+  void _showKitchenRush(BuildContext context, Restaurant restaurant) {
     showDialog(
       context: context,
       builder: (context) {
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final isTerminal = mode == AppThemeMode.neonTerminal;
-        final isPaper = mode == AppThemeMode.paperReceipt;
-        final isRetro = mode == AppThemeMode.retroOS;
-        final dialogTitle = switch (mode) {
-          AppThemeMode.neonTerminal => 'BILL::REQUEST',
-          AppThemeMode.paperReceipt => 'BILL RECEIPT',
-          AppThemeMode.retroOS => 'BILL.EXE',
-          AppThemeMode.neoBrutalism => restaurant.translate('request_bill'),
-        };
-        final titleColor = isTerminal
-            ? theme.cyan
-            : isRetro
-                ? Colors.white
-                : theme.ink;
-        final amountColor = isTerminal ? theme.amber : theme.ink;
-        final border = isRetro
-            ? Border(
-                top: BorderSide(color: Colors.white, width: 2),
-                left: BorderSide(color: Colors.white, width: 2),
-                right: BorderSide(color: theme.ink, width: 2),
-                bottom: BorderSide(color: theme.ink, width: 2),
-              )
-            : Border.all(
-                color: isTerminal ? theme.cyan : theme.border,
-                width: mode == AppThemeMode.neoBrutalism
-                    ? theme.strongBorderWidth
-                    : 1.5,
-              );
-
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 430),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isRetro ? theme.surfaceHigh : theme.surface,
-                borderRadius: isRetro
-                    ? null
-                    : BorderRadius.circular(
-                        mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-                      ),
-                border: border,
-                boxShadow: mode == AppThemeMode.neoBrutalism
-                    ? theme.hardShadow(offset: const Offset(5, 5))
-                    : isTerminal
-                        ? theme.softGlow(theme.cyan)
-                        : null,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isRetro ? 8 : 18,
-                      vertical: isRetro ? 8 : 16,
-                    ),
-                    color: isRetro ? theme.accent : Colors.transparent,
-                    child: Row(
-                      children: [
-                        Icon(
-                          isTerminal
-                              ? Icons.terminal
-                              : isPaper
-                                  ? Icons.receipt_long
-                                  : Icons.payments,
-                          color: titleColor,
-                          size: 19,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            dialogTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: titleColor,
-                              fontFamily:
-                                  isTerminal || isPaper ? 'Courier' : null,
-                              fontWeight: FontWeight.w900,
-                              fontSize: isRetro ? 13 : 18,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (hasItemsInCart)
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              color: theme.danger.withValues(alpha: 0.12),
-                              border: Border.all(color: theme.danger),
-                              borderRadius: BorderRadius.circular(
-                                mode == AppThemeMode.neoBrutalism
-                                    ? theme.radius
-                                    : 0,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.warning,
-                                    color: theme.danger, size: 16),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    restaurant.translate('warning_unordered'),
-                                    style: TextStyle(
-                                      color: theme.danger,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        if (isPaper)
-                          Container(
-                            height: 1,
-                            margin: const EdgeInsets.only(bottom: 14),
-                            color: theme.ink.withValues(alpha: 0.28),
-                          ),
-                        Text(
-                          isTerminal
-                              ? 'TOTAL_PAYMENT::'
-                              : restaurant.translate('total_payment'),
-                          style: TextStyle(
-                            color: theme.ink.withValues(alpha: 0.68),
-                            fontFamily:
-                                isTerminal || isPaper ? 'Courier' : null,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          '¥${grandTotal.toStringAsFixed(2)}',
-                          textAlign:
-                              isPaper ? TextAlign.center : TextAlign.left,
-                          style: TextStyle(
-                            color: amountColor,
-                            fontSize: isPaper ? 34 : 32,
-                            fontWeight: FontWeight.w900,
-                            fontFamily: 'Courier',
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          restaurant.translate('call_staff_prompt'),
-                          style: TextStyle(
-                            color: theme.ink.withValues(alpha: 0.62),
-                            fontSize: 12,
-                            height: 1.35,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: Text(
-                                  restaurant.translate('cancel'),
-                                  style: TextStyle(
-                                    color: theme.ink.withValues(alpha: 0.66),
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      backgroundColor: isTerminal
-                                          ? theme.cyan
-                                          : isPaper
-                                              ? theme.surface
-                                              : theme.amber,
-                                      content: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.notifications_active,
-                                            color: isTerminal
-                                                ? Colors.black
-                                                : theme.ink,
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Text(
-                                              restaurant.translate(
-                                                'staff_notified',
-                                              ),
-                                              style: TextStyle(
-                                                color: isTerminal
-                                                    ? Colors.black
-                                                    : theme.ink,
-                                                fontWeight: FontWeight.bold,
-                                                fontFamily: 'Courier',
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: isTerminal
-                                      ? theme.cyan
-                                      : isPaper
-                                          ? theme.surface
-                                          : isRetro
-                                              ? theme.surfaceHigh
-                                              : theme.amber,
-                                  foregroundColor:
-                                      isTerminal ? Colors.black : theme.ink,
-                                  side: BorderSide(
-                                    color: isTerminal ? theme.cyan : theme.ink,
-                                    width: mode == AppThemeMode.neoBrutalism
-                                        ? 3
-                                        : 2,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                      mode == AppThemeMode.neoBrutalism
-                                          ? theme.radius
-                                          : 0,
-                                    ),
-                                  ),
-                                ),
-                                child: Text(
-                                  restaurant.translate('call_staff'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color:
-                                        isTerminal ? Colors.black : theme.ink,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // 下单逻辑
-  void _placeOrder(BuildContext context, Restaurant restaurant) {
-    if (restaurant.getUniqueCartItems().isEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          final theme = AppTheme.of(context);
-          final mode = AppTheme.activeMode;
-          final title = switch (mode) {
-            AppThemeMode.neonTerminal => 'ORDER::EMPTY',
-            AppThemeMode.paperReceipt => restaurant.translate('order_empty'),
-            AppThemeMode.retroOS => 'EMPTY_ORDER.EXE',
-            AppThemeMode.neoBrutalism => restaurant.translate('order_empty'),
-          };
-
-          return ThemedAppDialog(
-            title: title,
-            icon: Icons.info_outline,
-            actions: [
-              ThemedDialogButton(
-                label: restaurant.translate('confirm'),
-                primary: true,
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-            child: Text(
-              restaurant.translate('select_items'),
-              style: TextStyle(
-                color: theme.ink.withValues(alpha: 0.72),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          );
-        },
-      );
-      return;
-    }
-
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) {
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final isTerminal = mode == AppThemeMode.neonTerminal;
-        final uniqueItems = restaurant.getUniqueCartItems();
-        final totalPrice = restaurant.getTotalPrice();
-        final title = switch (mode) {
-          AppThemeMode.neonTerminal => 'ORDER::CONFIRM',
-          AppThemeMode.paperReceipt => restaurant.translate('confirm_order'),
-          AppThemeMode.retroOS => 'CONFIRM.EXE',
-          AppThemeMode.neoBrutalism => restaurant.translate('confirm_order'),
-        };
-
-        Widget buildOrderRow(Food food) {
-          final quantity = restaurant.getFoodQuantity(food);
-          final itemSubtotal = (double.tryParse(food.price) ?? 0.0) * quantity;
-
-          return Container(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: isTerminal
-                      ? theme.cyan.withValues(alpha: 0.18)
-                      : theme.ink.withValues(alpha: 0.14),
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    isTerminal ? '> ${food.name}' : food.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: theme.ink,
-                      fontFamily:
-                          isTerminal || mode == AppThemeMode.paperReceipt
-                              ? 'Courier'
-                              : null,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8),
-                Text(
-                  'x$quantity',
-                  style: TextStyle(
-                    color: isTerminal ? theme.cyan : theme.ink,
-                    fontFamily: 'Courier',
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                SizedBox(width: 10),
-                SizedBox(
-                  width: 76,
-                  child: Text(
-                    '¥${itemSubtotal.toStringAsFixed(2)}',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: isTerminal ? theme.accentSoft : theme.ink,
-                      fontFamily: 'Courier',
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
         return ThemedAppDialog(
-          title: title,
-          icon: Icons.send,
+          title: restaurant.translate('rush_title'),
+          icon: Icons.local_fire_department,
           maxWidth: 520,
           actions: [
             ThemedDialogButton(
-              label: restaurant.translate('cancel'),
+              label: restaurant.translate('close'),
+              primary: true,
               onPressed: () => Navigator.pop(context),
             ),
-            ThemedDialogButton(
-              label: restaurant.translate('confirm'),
-              icon: Icons.send,
-              primary: true,
-              onPressed: () {
-                restaurant.placeOrder();
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).removeCurrentSnackBar();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      restaurant.translate('order_transmitted'),
-                      style: TextStyle(
-                        color: isTerminal ? Colors.black : theme.ink,
-                        fontFamily: 'Courier',
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    backgroundColor: isTerminal ? theme.cyan : theme.accent,
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              },
-            ),
           ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: 300),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: uniqueItems.length,
-                  itemBuilder: (context, index) {
-                    return buildOrderRow(uniqueItems[index]);
-                  },
-                ),
-              ),
-              Divider(
-                color: theme.ink.withValues(alpha: 0.18),
-                height: 22,
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    isTerminal ? 'TOTAL::' : restaurant.translate('total'),
-                    style: TextStyle(
-                      color: theme.ink,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'Courier',
-                    ),
-                  ),
-                  Text(
-                    "¥$totalPrice",
-                    style: TextStyle(
-                      color: isTerminal ? theme.amber : theme.ink,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'Courier',
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          child: SizedBox(
+            height: 390,
+            child: KitchenRushPanel(
+              restaurant: restaurant,
+              menu: restaurant.getMenu(),
+            ),
           ),
         );
       },
     );
   }
 
-  String _cartTitle(Restaurant restaurant) {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.neonTerminal:
-        return 'ORDER_CART::BUFFER';
-      case AppThemeMode.paperReceipt:
-        return 'RECEIPT';
-      case AppThemeMode.retroOS:
-        return 'CART.EXE';
-      case AppThemeMode.neoBrutalism:
-        return restaurant.translate('order_cart');
-    }
-  }
-
-  Widget _buildCartHeader(Restaurant restaurant, int itemCount) {
-    final mode = AppTheme.activeMode;
-    final countLabel = switch (mode) {
-      AppThemeMode.neonTerminal => 'QTY=$itemCount',
-      AppThemeMode.paperReceipt => '#$itemCount',
-      AppThemeMode.retroOS => itemCount.toString().padLeft(2, '0'),
-      AppThemeMode.neoBrutalism => itemCount.toString(),
-    };
-
-    if (mode == AppThemeMode.paperReceipt) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Text(
-              _cartTitle(restaurant),
-              style: TextStyle(
-                color: AppTheme.ink,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                fontFamily: 'Courier',
-              ),
-            ),
-          ),
-          SizedBox(height: 4),
-          Center(
-            child: Text(
-              'TABLE ORDER / ITEMS $countLabel',
-              style: TextStyle(
-                color: AppTheme.ink.withValues(alpha: 0.62),
-                fontSize: 11,
-                fontFamily: 'Courier',
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          SizedBox(height: 10),
-          Container(
-            height: 1,
-            color: AppTheme.ink.withValues(alpha: 0.28),
-          ),
-        ],
-      );
-    }
-
-    if (mode == AppThemeMode.retroOS) {
-      return Container(
-        height: 32,
-        decoration: BoxDecoration(
-          color: AppTheme.accent,
-          border: Border(
-            top: BorderSide(color: Colors.white, width: 2),
-            left: BorderSide(color: Colors.white, width: 2),
-            right: BorderSide(color: AppTheme.ink, width: 2),
-            bottom: BorderSide(color: AppTheme.ink, width: 2),
+  Future<void> _claimOfflineEarnings(
+    BuildContext context,
+    Restaurant restaurant,
+  ) async {
+    final game = context.read<GameController>();
+    final claimed = game.pendingClaimableEarnings;
+    await game.claimOfflineEarnings();
+    if (!context.mounted) return;
+    final theme = AppTheme.of(context);
+    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: isTerminal ? theme.cyan : theme.accent,
+        content: Text(
+          '${restaurant.translate('idle_pending_income')} +${game.formatCoins(claimed)}',
+          style: TextStyle(
+            color: isTerminal ? Colors.black : theme.ink,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Courier',
           ),
         ),
-        padding: EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: [
-            Icon(Icons.shopping_cart, color: Colors.white, size: 16),
-            SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _cartTitle(restaurant),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              color: AppTheme.surface,
-              child: Text(
-                countLabel,
-                style: TextStyle(
-                  color: AppTheme.ink,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  fontFamily: 'Courier',
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final isTerminal = mode == AppThemeMode.neonTerminal;
-    return Row(
-      children: [
-        Icon(
-          isTerminal ? Icons.terminal : Icons.shopping_bag_outlined,
-          color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-          size: 21,
-        ),
-        SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            _cartTitle(restaurant),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-              fontSize: isTerminal ? 14 : 19,
-              fontWeight: FontWeight.w900,
-              fontFamily: 'Courier',
-            ),
-          ),
-        ),
-        AnimatedContainer(
-          duration: Duration(milliseconds: 160),
-          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: itemCount == 0 ? AppTheme.surfaceHigh : AppTheme.accentSoft,
-            borderRadius: BorderRadius.circular(isTerminal ? 0 : 4),
-            border: Border.all(
-              color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-              width: isTerminal ? 1 : 2,
-            ),
-          ),
-          child: Text(
-            countLabel,
-            style: TextStyle(
-              color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-              fontWeight: FontWeight.w900,
-              fontFamily: 'Courier',
-              fontSize: 12,
-            ),
-          ),
-        ),
-      ],
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 
-  Widget _buildCartItemTile(Restaurant restaurant, Food food) {
-    final mode = AppTheme.activeMode;
-    final quantity = restaurant.getFoodQuantity(food);
-    final itemSubtotal = (double.tryParse(food.price) ?? 0.0) * quantity;
-
-    Widget quantityControls({bool compact = false}) {
-      return Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 4 : 6,
-          vertical: compact ? 2 : 4,
+  Future<void> _attemptUpgrade(
+    BuildContext context,
+    Future<bool> Function() action,
+  ) async {
+    final success = await action();
+    if (!context.mounted || success) return;
+    final restaurant = context.read<Restaurant>();
+    final theme = AppTheme.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: theme.danger,
+        content: Text(
+          restaurant.translate('idle_not_enough_coins'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        decoration: BoxDecoration(
-          color: mode == AppThemeMode.neonTerminal
-              ? Colors.transparent
-              : AppTheme.surfaceHigh,
-          borderRadius: BorderRadius.circular(
-            mode == AppThemeMode.retroOS || mode == AppThemeMode.paperReceipt
-                ? 0
-                : 4,
-          ),
-          border: Border.all(
-            color: mode == AppThemeMode.neonTerminal
-                ? AppTheme.cyan.withValues(alpha: 0.58)
-                : AppTheme.ink,
-            width: mode == AppThemeMode.neonTerminal ? 1 : 2,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _CartIconButton(
-              icon: Icons.remove,
-              tooltip: 'remove',
-              onTap: () => restaurant.removeFromCart(food),
-            ),
-            SizedBox(
-              width: compact ? 24 : 28,
-              child: Text(
-                '$quantity',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.ink,
-                  fontWeight: FontWeight.w900,
-                  fontFamily: 'Courier',
-                ),
-              ),
-            ),
-            _CartIconButton(
-              icon: Icons.add,
-              tooltip: 'add',
-              onTap: () => restaurant.addToCart(food),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.neonTerminal) {
-      return Container(
-        padding: EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: AppTheme.cyan.withValues(alpha: 0.16)),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '> ${food.name}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'Courier',
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'SUBTOTAL ¥${itemSubtotal.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      color: AppTheme.cyan.withValues(alpha: 0.82),
-                      fontSize: 11,
-                      fontFamily: 'Courier',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(width: 8),
-            quantityControls(compact: true),
-          ],
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.paperReceipt) {
-      return Container(
-        padding: EdgeInsets.symmetric(vertical: 9),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: AppTheme.ink.withValues(alpha: 0.16)),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                food.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.ink,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            Text(
-              'x$quantity',
-              style: TextStyle(
-                color: AppTheme.ink.withValues(alpha: 0.62),
-                fontFamily: 'Courier',
-                fontSize: 12,
-              ),
-            ),
-            SizedBox(width: 8),
-            SizedBox(
-              width: 64,
-              child: Text(
-                '¥${itemSubtotal.toStringAsFixed(2)}',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: AppTheme.ink,
-                  fontSize: 12,
-                  fontFamily: 'Courier',
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            SizedBox(width: 8),
-            quantityControls(compact: true),
-          ],
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.retroOS) {
-      return Container(
-        padding: EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          border: Border(
-            top: BorderSide(color: Colors.white, width: 2),
-            left: BorderSide(color: Colors.white, width: 2),
-            right: BorderSide(color: AppTheme.ink, width: 2),
-            bottom: BorderSide(color: AppTheme.ink, width: 2),
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(Icons.menu_book, color: AppTheme.ink, size: 18),
-            SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    food.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                  Text(
-                    '¥${itemSubtotal.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      color: AppTheme.ink,
-                      fontSize: 12,
-                      fontFamily: 'Courier',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(width: 8),
-            quantityControls(compact: true),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      padding: EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(
-          color: AppTheme.ink,
-          width: 2,
-        ),
-        boxShadow: AppTheme.brutalShadow(
-          offset: Offset(3, 3),
-        ),
+        duration: const Duration(seconds: 1),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  food.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  '¥${itemSubtotal.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: 12,
-                    fontFamily: 'Courier',
-                  ),
+    );
+  }
+
+  void _showDishBook(BuildContext context, Restaurant restaurant) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Consumer<GameController>(
+          builder: (context, game, child) {
+            return ThemedAppDialog(
+              title: restaurant.translate('rush_dish_book'),
+              icon: Icons.menu_book,
+              maxWidth: 620,
+              actions: [
+                ThemedDialogButton(
+                  label: restaurant.translate('close'),
+                  primary: true,
+                  onPressed: () => Navigator.pop(context),
                 ),
               ],
-            ),
-          ),
-          SizedBox(width: 8),
-          quantityControls(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCartSidePanel(
-    BuildContext context,
-    Restaurant restaurant, {
-    bool compact = false,
-  }) {
-    final uniqueItems = restaurant.getUniqueCartItems();
-    final totalPrice = restaurant.getTotalPrice();
-    final itemCount = _cartItemCount(restaurant);
-    final mode = AppTheme.activeMode;
-    final isTerminal = mode == AppThemeMode.neonTerminal;
-    final isPaper = mode == AppThemeMode.paperReceipt;
-    final isRetro = mode == AppThemeMode.retroOS;
-    final borderColor = isTerminal ? AppTheme.cyan : AppTheme.ink;
-    final borderWidth = isTerminal || isPaper ? 1.5 : 3.0;
-    final orderLabel = switch (mode) {
-      AppThemeMode.neonTerminal =>
-        uniqueItems.isEmpty ? 'AWAIT_SELECTION' : 'TRANSMIT_ORDER',
-      AppThemeMode.paperReceipt => uniqueItems.isEmpty
-          ? restaurant.translate('select_items')
-          : 'PRINT ORDER',
-      AppThemeMode.retroOS => uniqueItems.isEmpty
-          ? restaurant.translate('select_items')
-          : 'Send Order',
-      AppThemeMode.neoBrutalism => uniqueItems.isEmpty
-          ? restaurant.translate('select_items')
-          : restaurant.translate('transmit_order'),
-    };
-    final totalLabel = switch (mode) {
-      AppThemeMode.neonTerminal => 'TOTAL_BUFFER',
-      AppThemeMode.paperReceipt => 'TOTAL DUE',
-      AppThemeMode.retroOS => 'Total:',
-      AppThemeMode.neoBrutalism => "${restaurant.translate('total')}:",
-    };
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isRetro ? AppTheme.surfaceHigh : AppTheme.surface,
-        border: compact
-            ? Border(top: BorderSide(color: borderColor, width: borderWidth))
-            : Border(
-                left: BorderSide(color: borderColor, width: borderWidth),
-              ),
-      ),
-      padding: EdgeInsets.fromLTRB(
-        isPaper ? 18 : 14,
-        compact ? 12 : 16,
-        isPaper ? 18 : 14,
-        12,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildCartHeader(restaurant, itemCount),
-          SizedBox(height: isPaper ? 8 : 10),
-          if (!isPaper) Divider(),
-          Expanded(
-            child: uniqueItems.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.add_shopping_cart,
-                          color: AppTheme.ink.withValues(alpha: 0.24),
-                          size: compact ? 34 : 42,
-                        ),
-                        SizedBox(height: compact ? 8 : 12),
-                        Text(
-                          isTerminal
-                              ? 'BUFFER EMPTY'
-                              : restaurant.translate('cart_empty'),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppTheme.ink.withValues(
-                              alpha: isTerminal ? 0.7 : 0.58,
-                            ),
-                            fontFamily: 'Courier',
-                            fontSize: compact ? 13 : 14,
-                            height: compact ? 1.25 : 1.35,
-                          ),
-                        ),
-                      ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final food in restaurant.getMenu()) ...[
+                    Builder(
+                      builder: (context) {
+                        final locked = !game.isFoodUnlocked(food.id);
+                        return _DishBookTile(
+                          icon: locked ? Icons.lock : _foodIcon(food),
+                          title: locked
+                              ? restaurant.translate('idle_locked_dish')
+                              : food.name,
+                          menuLevelLabel: locked
+                              ? restaurant.translate('idle_locked')
+                              : '${restaurant.translate('idle_menu')} Lv ${game.menuLevel(food.id)}',
+                          masteryLabel: locked
+                              ? '${restaurant.translate('idle_unlock_level')} ${game.foodUnlockLevel(food.id)}'
+                              : '${restaurant.translate('rush_mastery')} Lv ${game.masteryLevelForFood(food.id)}',
+                          servedLabel: locked
+                              ? restaurant.translate('idle_not_in_order_pool')
+                              : '${restaurant.translate('rush_served')} ${game.servedCountForFood(food.id)}',
+                          rewardLabel: locked
+                              ? '--'
+                              : '+${game.formatCoins(
+                                  game.customerOrderRewardForFood(food.id),
+                                )}',
+                          costLabel: locked
+                              ? 'Lv ${game.foodUnlockLevel(food.id)}'
+                              : '${restaurant.translate('idle_cost')} ${game.formatCoins(game.menuUpgradeCost(food.id))}',
+                          masteryProgress: locked
+                              ? 0
+                              : game.masteryProgressRatioForFood(food.id),
+                          masteryProgressLabel: locked
+                              ? '0/${game.masteryProgressTarget}'
+                              : '${game.masteryProgressForFood(food.id)}/${game.masteryProgressTarget}',
+                          canAfford: !locked &&
+                              game.coins >= game.menuUpgradeCost(food.id),
+                          locked: locked,
+                          onTap: locked
+                              ? null
+                              : () => _attemptUpgrade(
+                                    context,
+                                    () => game.upgradeMenuItem(food.id),
+                                  ),
+                        );
+                      },
                     ),
-                  )
-                : ListView.separated(
-                    itemCount: uniqueItems.length,
-                    separatorBuilder: (context, index) => SizedBox(
-                      height: isPaper || isTerminal ? 0 : 10,
-                    ),
-                    itemBuilder: (context, index) {
-                      final food = uniqueItems[index];
-                      return _buildCartItemTile(restaurant, food);
-                    },
-                  ),
-          ),
-          Divider(),
-          Row(
-            children: [
-              Tooltip(
-                message: restaurant.translate('history_log'),
-                child: _CartActionButton(
-                  icon: Icons.history,
-                  color: AppTheme.cyan.withValues(alpha: 0.86),
-                  onTap: () => _showHistoryLog(context, restaurant),
-                ),
-              ),
-              SizedBox(width: 10),
-              Tooltip(
-                message: restaurant.translate('request_bill'),
-                child: _CartActionButton(
-                  icon: Icons.receipt_long,
-                  color: AppTheme.amber,
-                  onTap: () => _requestBill(context, restaurant),
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      totalLabel,
-                      style: TextStyle(
-                        color: AppTheme.ink.withValues(alpha: 0.68),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                        fontFamily: isTerminal || isPaper ? 'Courier' : null,
-                      ),
-                    ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        "¥$totalPrice",
-                        style: TextStyle(
-                          color: AppTheme.ink,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          fontFamily: 'Courier',
-                        ),
-                      ),
-                    ),
+                    const SizedBox(height: 10),
                   ],
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showOperations(BuildContext context, Restaurant restaurant) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Consumer<GameController>(
+          builder: (context, game, child) {
+            return ThemedAppDialog(
+              title: restaurant.translate('rush_operations'),
+              icon: Icons.storefront,
+              maxWidth: 560,
+              actions: [
+                ThemedDialogButton(
+                  label: restaurant.translate('close'),
+                  primary: true,
+                  onPressed: () => Navigator.pop(context),
                 ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: Container(
-              decoration: BoxDecoration(
-                boxShadow: uniqueItems.isEmpty
-                    ? null
-                    : AppTheme.brutalShadow(offset: Offset(3, 3)),
-              ),
-              child: ElevatedButton.icon(
-                onPressed: uniqueItems.isEmpty
-                    ? null
-                    : () => _placeOrder(context, restaurant),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: uniqueItems.isEmpty
-                      ? AppTheme.surfaceHigh
-                      : isTerminal
-                          ? AppTheme.cyan
-                          : AppTheme.accent,
-                  foregroundColor: isTerminal && uniqueItems.isNotEmpty
-                      ? Colors.black
-                      : AppTheme.ink,
-                  disabledBackgroundColor: AppTheme.surfaceHigh,
-                  disabledForegroundColor: AppTheme.ink.withValues(alpha: 0.45),
-                  side: BorderSide(
-                    color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-                    width: isTerminal || isPaper || isRetro ? 2 : 3,
+              ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ProgressInfoTile(
+                    icon: Icons.trending_up,
+                    title:
+                        '${restaurant.translate('idle_shop_xp')} Lv ${game.restaurantXpLevel}',
+                    description: restaurant.translate('idle_shop_xp_desc'),
+                    progress: game.restaurantXpProgressRatio,
+                    trailingLabel:
+                        '${game.restaurantXpProgress}/${game.restaurantXpProgressTarget}',
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      isTerminal || isPaper || isRetro ? 0 : 4,
+                  const SizedBox(height: 10),
+                  _UpgradeTile(
+                    icon: Icons.table_restaurant,
+                    title:
+                        '${restaurant.translate('idle_seats')} Lv ${game.seatLevel}',
+                    description:
+                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.seatUpgradeCost)} / ${restaurant.translate('idle_more_customer_flow')}',
+                    trailingLabel:
+                        '+${game.formatCoins(game.revenuePerMinute)}/min',
+                    canAfford: game.coins >= game.seatUpgradeCost,
+                    onTap: () => _attemptUpgrade(context, game.upgradeSeats),
+                  ),
+                  const SizedBox(height: 10),
+                  _UpgradeTile(
+                    icon: Icons.support_agent,
+                    title:
+                        '${restaurant.translate('idle_service')} Lv ${game.serviceLevel}',
+                    description:
+                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.serviceUpgradeCost)} / ${restaurant.translate('idle_faster_table_turns')}',
+                    trailingLabel: '${game.customerArrivalDelay.inSeconds}s',
+                    canAfford: game.coins >= game.serviceUpgradeCost,
+                    onTap: () => _attemptUpgrade(context, game.upgradeService),
+                  ),
+                  const SizedBox(height: 10),
+                  _UpgradeTile(
+                    icon: Icons.kitchen,
+                    title:
+                        '${restaurant.translate('idle_kitchen')} Lv ${game.kitchenLevel}',
+                    description:
+                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.kitchenUpgradeCost)} / ${restaurant.translate('idle_kitchen_boost')}',
+                    trailingLabel:
+                        '+${game.formatCoins((game.kitchenLevel * 3).toDouble())}',
+                    canAfford: game.coins >= game.kitchenUpgradeCost,
+                    onTap: () => _attemptUpgrade(context, game.upgradeKitchen),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showGoals(BuildContext context, Restaurant restaurant) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Consumer<GameController>(
+          builder: (context, game, child) {
+            return ThemedAppDialog(
+              title: restaurant.translate('idle_goals_title'),
+              icon: Icons.flag,
+              maxWidth: 580,
+              actions: [
+                ThemedDialogButton(
+                  label: restaurant.translate('close'),
+                  primary: true,
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final milestone in game.milestones) ...[
+                    _GoalTile(
+                      milestone: milestone,
+                      restaurant: restaurant,
+                      onClaim: milestone.claimable
+                          ? () => _claimMilestone(context, game, milestone)
+                          : null,
                     ),
+                    const SizedBox(height: 10),
+                  ],
+                  _DialogSectionLabel(
+                    label: restaurant.translate('daily_tasks_title'),
                   ),
-                ),
-                icon: Icon(
-                  isTerminal
-                      ? Icons.terminal
-                      : isPaper
-                          ? Icons.receipt_long
-                          : Icons.send,
-                  size: 18,
-                ),
-                label: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    orderLabel,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14,
-                      fontFamily: isTerminal || isPaper ? 'Courier' : null,
+                  const SizedBox(height: 10),
+                  for (final task in game.dailyTasks) ...[
+                    _DailyTaskTile(
+                      task: task,
+                      restaurant: restaurant,
+                      onClaim: task.claimable
+                          ? () => _claimDailyTask(context, game, task)
+                          : null,
                     ),
+                    const SizedBox(height: 10),
+                  ],
+                  _DialogSectionLabel(
+                    label: restaurant.translate('achievements_title'),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  _StatsGrid(
+                    items: [
+                      _StatItem(
+                        icon: Icons.flag,
+                        label: restaurant.translate('stat_claimed_goals'),
+                        value:
+                            '${game.claimedMilestoneIds.length}/${game.milestones.length}',
+                      ),
+                      _StatItem(
+                        icon: Icons.today,
+                        label: restaurant.translate('stat_today_claimed'),
+                        value:
+                            '${game.claimedDailyTaskIds.length}/${game.dailyTasks.length}',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _DialogSectionLabel(
+                    label: restaurant.translate('stats_title'),
+                  ),
+                  const SizedBox(height: 10),
+                  _StatsGrid(
+                    items: [
+                      _StatItem(
+                        icon: Icons.room_service,
+                        label: restaurant.translate('stat_total_served'),
+                        value: '${game.customerOrdersServed}',
+                      ),
+                      _StatItem(
+                        icon: Icons.local_fire_department,
+                        label: restaurant.translate('stat_best_combo'),
+                        value: 'x${game.bestCombo}',
+                      ),
+                      _StatItem(
+                        icon: Icons.toll,
+                        label: restaurant.translate('stat_lifetime_earnings'),
+                        value: game.formatCoins(game.lifetimeEarnings),
+                      ),
+                      _StatItem(
+                        icon: Icons.restaurant_menu,
+                        label: restaurant.translate('stat_favorite_dish'),
+                        value: _favoriteDishName(restaurant, game),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _claimMilestone(
+    BuildContext context,
+    GameController game,
+    GameMilestone milestone,
+  ) async {
+    final restaurant = context.read<Restaurant>();
+    final reward = await game.claimMilestone(milestone.id);
+    if (!context.mounted || reward <= 0) return;
+    final theme = AppTheme.of(context);
+    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: isTerminal ? theme.cyan : theme.accent,
+        content: Text(
+          '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
+          style: TextStyle(
+            color: isTerminal ? Colors.black : theme.ink,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Courier',
           ),
-        ],
+        ),
+        duration: const Duration(seconds: 1),
       ),
     );
   }
 
-  int _menuColumnCount(double width) {
-    if (width >= 900) return 3;
-    if (width >= 560) return 2;
-    return 1;
+  Future<void> _claimDailyTask(
+    BuildContext context,
+    GameController game,
+    GameDailyTask task,
+  ) async {
+    final restaurant = context.read<Restaurant>();
+    final reward = await game.claimDailyTask(task.id);
+    if (!context.mounted || reward <= 0) return;
+    final theme = AppTheme.of(context);
+    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: isTerminal ? theme.cyan : theme.accent,
+        content: Text(
+          '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
+          style: TextStyle(
+            color: isTerminal ? Colors.black : theme.ink,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Courier',
+          ),
+        ),
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
-  double _menuCardAspectRatio(double width) {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.paperReceipt:
-        if (width >= 900) return 1.45;
-        if (width >= 560) return 1.35;
-        return 1.8;
-      case AppThemeMode.neonTerminal:
-        if (width >= 900) return 1.05;
-        if (width >= 560) return 0.95;
-        return 1.55;
-      case AppThemeMode.retroOS:
-        if (width >= 900) return 0.95;
-        if (width >= 560) return 0.9;
-        return 1.45;
-      case AppThemeMode.neoBrutalism:
-        break;
+  String _favoriteDishName(Restaurant restaurant, GameController game) {
+    final menu = restaurant.getMenu().toList()
+      ..sort((a, b) {
+        final servedCompare = game
+            .servedCountForFood(b.id)
+            .compareTo(game.servedCountForFood(a.id));
+        if (servedCompare != 0) return servedCompare;
+        return a.id.compareTo(b.id);
+      });
+    if (menu.isEmpty || game.servedCountForFood(menu.first.id) <= 0) {
+      return '-';
     }
-    if (width >= 900) return 0.88;
-    if (width >= 560) return 0.82;
-    return 1.45;
+    return menu.first.name;
   }
 
-  int _cartItemCount(Restaurant restaurant) {
-    return restaurant
-        .getUniqueCartItems()
-        .fold(0, (sum, food) => sum + restaurant.getFoodQuantity(food));
-  }
-
-  IconData _categoryIcon(String categoryId) {
-    switch (categoryId) {
-      case 'fish':
-        return Icons.set_meal;
-      case 'meat':
-        return Icons.dinner_dining;
-      case 'beer':
-        return Icons.local_drink;
-      case 'side':
-        return Icons.eco;
-      case 'bento':
-        return Icons.rice_bowl;
-      default:
-        return Icons.local_fire_department;
+  IconData _foodIcon(Food food) {
+    if (food.tags.contains('fish') || food.tags.contains('tuna')) {
+      return Icons.set_meal;
     }
+    if (food.tags.contains('meat') || food.tags.contains('beef')) {
+      return Icons.dinner_dining;
+    }
+    if (food.tags.contains('beer')) return Icons.local_drink;
+    if (food.tags.contains('bento')) return Icons.rice_bowl;
+    if (food.tags.contains('side')) return Icons.eco;
+    return Icons.ramen_dining;
   }
 
-  Widget _buildMainCategoryButton(
-    Restaurant restaurant,
-    Map<String, String> category,
-    bool isSelected,
-  ) {
-    final categoryId = category['id']!;
-    final label = restaurant.translate(category['key']!);
-    final mode = AppTheme.activeMode;
+  Widget _buildOfflineClaimStrip(Restaurant restaurant) {
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        if (game.pendingClaimableEarnings <= 0) {
+          return const SizedBox.shrink();
+        }
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.activeMode;
+        final isTerminal = mode == AppThemeMode.neonTerminal;
 
-    if (mode == AppThemeMode.neonTerminal) {
-      return Padding(
-        padding: EdgeInsets.symmetric(horizontal: 5, vertical: 10),
-        child: InkWell(
-          onTap: () => _onMainCategoryTap(categoryId),
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          color: mode == AppThemeMode.retroOS
+              ? theme.surfaceHigh
+              : theme.background,
+          child: SizedBox(
+            height: 42,
+            child: ElevatedButton.icon(
+              onPressed: () => _claimOfflineEarnings(context, restaurant),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isTerminal ? theme.cyan : theme.amber,
+                foregroundColor: isTerminal ? Colors.black : theme.ink,
+                side: BorderSide(
+                  color: isTerminal ? theme.cyan : theme.border,
+                  width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(
+                    mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                  ),
+                ),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.savings, size: 18),
+              label: Text(
+                '${restaurant.translate('idle_claim_income')} +${game.formatCoins(game.pendingClaimableEarnings)}',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEventStrip(Restaurant restaurant) {
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        final titleKey = game.activeEventTitleKey;
+        final descriptionKey = game.activeEventDescriptionKey;
+        if (titleKey == null || descriptionKey == null) {
+          return const SizedBox.shrink();
+        }
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.activeMode;
+        final isTerminal = mode == AppThemeMode.neonTerminal;
+        final isDiscount =
+            game.activeEventType == GameEventType.ingredientDiscount;
+        final valueLabel = isDiscount
+            ? '-10%'
+            : 'x${game.activeEventRewardMultiplier.toStringAsFixed(2)}';
+
+        return Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          color: mode == AppThemeMode.retroOS
+              ? theme.surfaceHigh
+              : theme.background,
           child: Container(
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(horizontal: 8),
+            height: 54,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: isSelected
-                  ? AppTheme.cyan.withValues(alpha: 0.14)
-                  : Colors.transparent,
+              color: isTerminal
+                  ? theme.background.withValues(alpha: 0.38)
+                  : theme.amber.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(
+                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+              ),
               border: Border.all(
-                color: isSelected ? AppTheme.cyan : AppTheme.border,
-                width: isSelected ? 2 : 1,
+                color: isTerminal ? theme.cyan : theme.amber,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
               ),
-            ),
-            child: Text(
-              isSelected ? '> $label' : '[$label]',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isSelected ? AppTheme.cyan : AppTheme.ink,
-                fontFamily: 'Courier',
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.paperReceipt) {
-      return InkWell(
-        onTap: () => _onMainCategoryTap(categoryId),
-        child: Container(
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.surface : AppTheme.background,
-            border: Border(
-              bottom: BorderSide(
-                color: isSelected ? AppTheme.accent : AppTheme.border,
-                width: isSelected ? 4 : 1,
-              ),
-            ),
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.ink,
-              fontFamily: 'Courier',
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.retroOS) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(4, 8, 4, 0),
-        child: InkWell(
-          onTap: () => _onMainCategoryTap(categoryId),
-          child: Container(
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.accent : AppTheme.surface,
-              border: Border(
-                top: BorderSide(color: Colors.white, width: 2),
-                left: BorderSide(color: Colors.white, width: 2),
-                right: BorderSide(color: AppTheme.ink, width: 2),
-                bottom: BorderSide(color: AppTheme.ink, width: 2),
-              ),
-            ),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isSelected ? Colors.white : AppTheme.ink,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          onTap: () => _onMainCategoryTap(categoryId),
-          borderRadius: BorderRadius.circular(4),
-          child: AnimatedContainer(
-            duration: Duration(milliseconds: 160),
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.amber : AppTheme.surface,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: AppTheme.ink,
-                width: isSelected ? 3 : 2,
-              ),
-              boxShadow: isSelected
-                  ? AppTheme.brutalShadow(offset: Offset(3, 3))
+              boxShadow: mode == AppThemeMode.neoBrutalism
+                  ? theme.hardShadow(offset: const Offset(3, 3))
                   : null,
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Row(
               children: [
                 Icon(
-                  _categoryIcon(categoryId),
-                  color: AppTheme.ink,
+                  isDiscount ? Icons.sell : Icons.bolt,
+                  color: isTerminal ? theme.cyan : theme.amber,
                   size: 20,
                 ),
-                SizedBox(height: 5),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        restaurant.translate(titleKey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        restaurant.translate(descriptionKey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink.withValues(alpha: 0.64),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  valueLabel,
                   style: TextStyle(
-                    color: AppTheme.ink,
-                    fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
+                    color: isTerminal ? theme.cyan : theme.ink,
+                    fontWeight: FontWeight.w900,
                     fontFamily: 'Courier',
-                    fontSize: 12,
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildSubCategoryChip(
-    Restaurant restaurant,
-    Map<String, String> subCat,
-  ) {
-    final subCatId = subCat['id']!;
-    final isMainCategorySelected =
-        subCatId == _selectedCategory && _selectedSubCategoryTag.isEmpty;
-    final isSubTagSelected = subCatId == _selectedSubCategoryTag;
-    final isSelected = isMainCategorySelected || isSubTagSelected;
-    final label = restaurant.translate(subCat['key']!);
-    final mode = AppTheme.activeMode;
+  Widget _buildNextGoalStrip(Restaurant restaurant) {
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        final milestone = game.nextMilestone;
+        if (milestone == null) return const SizedBox.shrink();
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.activeMode;
+        final isTerminal = mode == AppThemeMode.neonTerminal;
+        final highlighted = milestone.claimable;
 
-    if (mode == AppThemeMode.neonTerminal) {
-      return Padding(
-        padding: EdgeInsets.only(right: 10),
-        child: InkWell(
-          onTap: () => _onSubCategoryTap(subCatId),
+        return Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          color: mode == AppThemeMode.retroOS
+              ? theme.surfaceHigh
+              : theme.background,
           child: Container(
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(horizontal: 14),
+            height: 54,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: isSelected
-                  ? AppTheme.accent.withValues(alpha: 0.18)
-                  : Colors.transparent,
+              color: highlighted && !isTerminal
+                  ? theme.accent.withValues(alpha: 0.18)
+                  : mode == AppThemeMode.retroOS
+                      ? theme.surface
+                      : theme.surfaceHigh,
+              borderRadius: BorderRadius.circular(
+                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+              ),
               border: Border.all(
-                color: isSelected ? AppTheme.accent : AppTheme.border,
+                color: highlighted
+                    ? theme.accent
+                    : isTerminal
+                        ? theme.cyan
+                        : theme.border,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
               ),
-            ),
-            child: Text(
-              '--${label.toLowerCase().replaceAll(' ', '-')}',
-              style: TextStyle(
-                color: isSelected ? AppTheme.accentSoft : AppTheme.ink,
-                fontFamily: 'Courier',
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.paperReceipt) {
-      return Padding(
-        padding: EdgeInsets.only(right: 8),
-        child: InkWell(
-          onTap: () => _onSubCategoryTap(subCatId),
-          child: Container(
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.accent : AppTheme.surface,
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.white : AppTheme.ink,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.retroOS) {
-      return Padding(
-        padding: EdgeInsets.only(right: 8),
-        child: InkWell(
-          onTap: () => _onSubCategoryTap(subCatId),
-          child: Container(
-            alignment: Alignment.center,
-            padding: EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.accentSoft : AppTheme.surfaceHigh,
-              border: Border(
-                top: BorderSide(color: Colors.white, width: 2),
-                left: BorderSide(color: Colors.white, width: 2),
-                right: BorderSide(color: AppTheme.ink, width: 2),
-                bottom: BorderSide(color: AppTheme.ink, width: 2),
-              ),
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: AppTheme.ink,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: EdgeInsets.only(right: 10),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          onTap: () => _onSubCategoryTap(subCatId),
-          borderRadius: BorderRadius.circular(4),
-          child: AnimatedContainer(
-            duration: Duration(milliseconds: 160),
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: isSelected ? AppTheme.cyan : AppTheme.surface,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: AppTheme.ink,
-                width: 2,
-              ),
-              boxShadow: isSelected
-                  ? AppTheme.brutalShadow(offset: Offset(3, 3))
+              boxShadow: highlighted && mode == AppThemeMode.neoBrutalism
+                  ? theme.hardShadow(offset: const Offset(3, 3))
                   : null,
             ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: AppTheme.ink,
-                fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
-                fontSize: 12,
-              ),
+            child: Row(
+              children: [
+                Icon(
+                  highlighted ? Icons.flag : Icons.outlined_flag,
+                  color: highlighted ? theme.accent : theme.ink,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${restaurant.translate('rush_next_goal')}: ${restaurant.translate(milestone.titleKey)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                        ),
+                        child: LinearProgressIndicator(
+                          minHeight: 6,
+                          value: milestone.progressRatio,
+                          backgroundColor: theme.surface,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(theme.accent),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (highlighted)
+                  _GoalClaimChip(label: restaurant.translate('idle_claim'))
+                else
+                  Text(
+                    '${milestone.progress}/${milestone.target}',
+                    style: TextStyle(
+                      color: isTerminal ? theme.cyan : theme.ink,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Courier',
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildMenuModeHeader(int itemCount) {
-    final mode = AppTheme.activeMode;
-    final activeFilter = (_selectedSubCategoryTag.isNotEmpty
-            ? _selectedSubCategoryTag
-            : _selectedCategory)
-        .toUpperCase();
-
-    if (mode == AppThemeMode.neonTerminal) {
-      return Container(
-        height: 34,
-        padding: EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: AppTheme.background,
-          border: Border(
-            bottom: BorderSide(color: AppTheme.cyan.withValues(alpha: 0.42)),
+  Widget _buildActionDock(Restaurant restaurant) {
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        final actions = [
+          _DockAction(
+            icon: Icons.menu_book,
+            label: restaurant.translate('rush_dish_book'),
+            onTap: (context) => _showDishBook(context, restaurant),
           ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '> list menu --filter=$activeFilter',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.cyan,
-                  fontFamily: 'Courier',
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
+          _DockAction(
+            icon: Icons.storefront,
+            label: restaurant.translate('rush_operations'),
+            onTap: (context) => _showOperations(context, restaurant),
+          ),
+          _DockAction(
+            icon: Icons.flag,
+            label: restaurant.translate('idle_goals'),
+            badgeCount: game.claimableRewardCount,
+            onTap: (context) => _showGoals(context, restaurant),
+          ),
+          _DockAction(
+            icon: Icons.history,
+            label: restaurant.translate('history_log'),
+            onTap: (context) => _showHistoryLog(context, restaurant),
+          ),
+        ];
+
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.activeMode;
+        final isTerminal = mode == AppThemeMode.neonTerminal;
+        final borderColor = isTerminal ? theme.cyan : theme.border;
+
+        return SafeArea(
+          top: false,
+          child: Container(
+            decoration: BoxDecoration(
+              color: mode == AppThemeMode.retroOS
+                  ? theme.surfaceHigh
+                  : theme.surface,
+              border: Border(
+                top: BorderSide(
+                  color: borderColor,
+                  width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
                 ),
               ),
+              boxShadow: isTerminal ? theme.softGlow(theme.cyan) : null,
             ),
-            SizedBox(width: 10),
-            Text(
-              '$itemCount ITEMS',
-              style: TextStyle(
-                color: AppTheme.amber,
-                fontFamily: 'Courier',
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              children: [
+                for (var index = 0; index < actions.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 8),
+                  Expanded(child: _DockButton(action: actions[index])),
+                ],
+              ],
             ),
-          ],
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.paperReceipt) {
-      return Container(
-        height: 42,
-        padding: EdgeInsets.symmetric(horizontal: 18),
-        color: AppTheme.surface,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              "TODAY'S MENU / $itemCount ITEMS",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.ink,
-                fontFamily: 'Courier',
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            SizedBox(height: 6),
-            Container(
-              height: 1,
-              color: AppTheme.ink.withValues(alpha: 0.28),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (mode == AppThemeMode.retroOS) {
-      return Container(
-        height: 30,
-        margin: EdgeInsets.fromLTRB(8, 8, 8, 0),
-        decoration: BoxDecoration(
-          color: AppTheme.accent,
-          border: Border(
-            top: BorderSide(color: Colors.white, width: 2),
-            left: BorderSide(color: Colors.white, width: 2),
-            right: BorderSide(color: AppTheme.ink, width: 2),
-            bottom: BorderSide(color: AppTheme.ink, width: 2),
           ),
-        ),
-        padding: EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: [
-            Icon(Icons.folder_open, color: Colors.white, size: 16),
-            SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Menu Browser',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            Text(
-              '$itemCount files',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return SizedBox.shrink();
+        );
+      },
+    );
   }
 
-  Widget _buildMenuArea(
-    Restaurant restaurant,
-    List<Food> currentMenu,
-    List<Map<String, String>> currentSubCategories,
-    double width,
-  ) {
-    final mode = AppTheme.activeMode;
-    final columnCount = _menuColumnCount(width);
-    final useScrollableCategories = width < 720;
-    final gridPadding = switch (mode) {
-      AppThemeMode.neonTerminal => width < 560 ? 12.0 : 18.0,
-      AppThemeMode.paperReceipt => width < 560 ? 12.0 : 18.0,
-      AppThemeMode.retroOS => width < 560 ? 10.0 : 14.0,
-      AppThemeMode.neoBrutalism => width < 560 ? 16.0 : 22.0,
-    };
-    final gridSpacing = switch (mode) {
-      AppThemeMode.neonTerminal => width < 560 ? 12.0 : 16.0,
-      AppThemeMode.paperReceipt => width < 560 ? 8.0 : 12.0,
-      AppThemeMode.retroOS => width < 560 ? 8.0 : 10.0,
-      AppThemeMode.neoBrutalism => width < 560 ? 18.0 : 24.0,
-    };
-    final categoryHeight = switch (mode) {
-      AppThemeMode.neonTerminal => 54.0,
-      AppThemeMode.paperReceipt => 48.0,
-      AppThemeMode.retroOS => 42.0,
-      AppThemeMode.neoBrutalism => 76.0,
-    };
-    final subCategoryHeight = switch (mode) {
-      AppThemeMode.neonTerminal => 44.0,
-      AppThemeMode.paperReceipt => 44.0,
-      AppThemeMode.retroOS => 42.0,
-      AppThemeMode.neoBrutalism => 60.0,
-    };
-    final categoryBackground = switch (mode) {
-      AppThemeMode.neonTerminal => AppTheme.surface,
-      AppThemeMode.paperReceipt => AppTheme.surface,
-      AppThemeMode.retroOS => AppTheme.surfaceHigh,
-      AppThemeMode.neoBrutalism => AppTheme.surfaceHigh,
-    };
-    final categoryBorderColor =
-        mode == AppThemeMode.neonTerminal ? AppTheme.cyan : AppTheme.ink;
-    final categoryBorderWidth = switch (mode) {
-      AppThemeMode.neonTerminal => 1.0,
-      AppThemeMode.paperReceipt => 1.0,
-      AppThemeMode.retroOS => 2.0,
-      AppThemeMode.neoBrutalism => 3.0,
-    };
+  Widget _buildDashboard(Restaurant restaurant, BoxConstraints constraints) {
+    final menu = restaurant.getMenu();
+    final wideLandscape = constraints.maxWidth >= 820 &&
+        constraints.maxWidth > constraints.maxHeight;
 
     return Column(
       children: [
-        _buildMenuModeHeader(currentMenu.length),
-        Container(
-          height: categoryHeight,
-          decoration: BoxDecoration(
-            color: categoryBackground,
-            border: Border(
-              bottom: BorderSide(
-                color: categoryBorderColor,
-                width: categoryBorderWidth,
-              ),
-            ),
-          ),
-          child: useScrollableCategories
-              ? ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: _categories.map((cat) {
-                    final isSelected = cat['id'] == _selectedCategory;
-                    return SizedBox(
-                      width: 112,
-                      child:
-                          _buildMainCategoryButton(restaurant, cat, isSelected),
-                    );
-                  }).toList(),
-                )
-              : Row(
-                  children: _categories.map((cat) {
-                    final isSelected = cat['id'] == _selectedCategory;
-                    return Expanded(
-                      child:
-                          _buildMainCategoryButton(restaurant, cat, isSelected),
-                    );
-                  }).toList(),
-                ),
+        GameStatusBar(
+          restaurant: restaurant,
+          menu: menu,
+          showCustomerButton: false,
+          showActions: false,
         ),
-        Container(
-          height: currentSubCategories.isEmpty ? 0 : subCategoryHeight,
-          width: double.infinity,
-          color: mode == AppThemeMode.retroOS
-              ? AppTheme.surfaceHigh
-              : AppTheme.background,
-          alignment: Alignment.centerLeft,
-          child: currentSubCategories.isEmpty
-              ? Container()
-              : ListView.builder(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: mode == AppThemeMode.retroOS ? 10 : 16,
-                    vertical: mode == AppThemeMode.neoBrutalism ? 12 : 8,
-                  ),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: currentSubCategories.length,
-                  itemBuilder: (context, index) {
-                    return _buildSubCategoryChip(
-                      restaurant,
-                      currentSubCategories[index],
-                    );
-                  },
-                ),
-        ),
+        _buildOfflineClaimStrip(restaurant),
+        _buildEventStrip(restaurant),
+        _buildNextGoalStrip(restaurant),
         Expanded(
-          child: Container(
-            decoration: BoxDecoration(color: AppTheme.background),
-            child: GridView.builder(
-              padding: EdgeInsets.all(gridPadding),
-              itemCount: currentMenu.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columnCount,
-                childAspectRatio: _menuCardAspectRatio(width),
-                crossAxisSpacing: gridSpacing,
-                mainAxisSpacing: gridSpacing,
-              ),
-              itemBuilder: (context, index) {
-                return FoodTile(food: currentMenu[index]);
-              },
-            ),
+          child: LayoutBuilder(
+            builder: (context, bodyConstraints) {
+              if (wideLandscape) {
+                final stageHeight = bodyConstraints.maxHeight;
+                return Row(
+                  children: [
+                    Expanded(
+                      child: CustomerArrivalStage(
+                        restaurant: restaurant,
+                        menu: menu,
+                        prominent: true,
+                        height: stageHeight,
+                        recentCompletedOrders: _recentCompletedOrders,
+                        coinBurstSeed: _coinBurstSeed,
+                      ),
+                    ),
+                    SizedBox(
+                      width: (constraints.maxWidth * 0.34)
+                          .clamp(340.0, 430.0)
+                          .toDouble(),
+                      child: _IdleControlPanel(
+                        restaurant: restaurant,
+                        menu: menu,
+                        onClaim: () => _claimOfflineEarnings(
+                          context,
+                          restaurant,
+                        ),
+                        onRush: () => _showKitchenRush(context, restaurant),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              final minPanelHeight =
+                  bodyConstraints.maxHeight < 560 ? 220.0 : 252.0;
+              var stageHeight = (bodyConstraints.maxHeight * 0.58)
+                  .clamp(220.0, 420.0)
+                  .toDouble();
+              if (bodyConstraints.maxHeight - stageHeight < minPanelHeight) {
+                stageHeight = (bodyConstraints.maxHeight - minPanelHeight)
+                    .clamp(190.0, 420.0)
+                    .toDouble();
+              }
+              final panelHeight =
+                  (bodyConstraints.maxHeight - stageHeight).clamp(
+                minPanelHeight,
+                bodyConstraints.maxHeight,
+              );
+
+              return Column(
+                children: [
+                  CustomerArrivalStage(
+                    restaurant: restaurant,
+                    menu: menu,
+                    prominent: true,
+                    height: stageHeight,
+                    recentCompletedOrders: _recentCompletedOrders,
+                    coinBurstSeed: _coinBurstSeed,
+                  ),
+                  SizedBox(
+                    height: panelHeight.toDouble(),
+                    child: _IdleControlPanel(
+                      restaurant: restaurant,
+                      menu: menu,
+                      onClaim: () => _claimOfflineEarnings(
+                        context,
+                        restaurant,
+                      ),
+                      onRush: () => _showKitchenRush(context, restaurant),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
+        _buildActionDock(restaurant),
       ],
     );
   }
@@ -1776,72 +875,11 @@ class _MenuPageState extends State<MenuPage> {
   Widget build(BuildContext context) {
     return Consumer<Restaurant>(
       builder: (context, restaurant, child) {
-        final String activeFilterTag = _selectedSubCategoryTag.isNotEmpty
-            ? _selectedSubCategoryTag
-            : _selectedCategory;
-
-        List<Food> currentMenu = restaurant.getMenuByTag(activeFilterTag);
-
-        final List<Map<String, String>> currentSubCategories =
-            _subCategoryMap[_selectedCategory] ?? [];
-
         return Scaffold(
           backgroundColor: AppTheme.background,
           body: LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 900;
-
-              if (isWide) {
-                return Row(
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: LayoutBuilder(
-                        builder: (context, menuConstraints) {
-                          return _buildMenuArea(
-                            restaurant,
-                            currentMenu,
-                            currentSubCategories,
-                            menuConstraints.maxWidth,
-                          );
-                        },
-                      ),
-                    ),
-                    Expanded(
-                      flex: 1,
-                      child: _buildCartSidePanel(context, restaurant),
-                    ),
-                  ],
-                );
-              }
-
-              final cartHeight =
-                  (constraints.maxHeight * 0.38).clamp(260.0, 360.0).toDouble();
-
-              return Column(
-                children: [
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, menuConstraints) {
-                        return _buildMenuArea(
-                          restaurant,
-                          currentMenu,
-                          currentSubCategories,
-                          menuConstraints.maxWidth,
-                        );
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    height: cartHeight,
-                    child: _buildCartSidePanel(
-                      context,
-                      restaurant,
-                      compact: true,
-                    ),
-                  ),
-                ],
-              );
+              return _buildDashboard(restaurant, constraints);
             },
           ),
         );
@@ -1850,35 +888,363 @@ class _MenuPageState extends State<MenuPage> {
   }
 }
 
-class _CartIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
+class _IdleControlPanel extends StatelessWidget {
+  final Restaurant restaurant;
+  final List<Food> menu;
+  final VoidCallback onClaim;
+  final VoidCallback onRush;
 
-  const _CartIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
+  const _IdleControlPanel({
+    required this.restaurant,
+    required this.menu,
+    required this.onClaim,
+    required this.onRush,
   });
 
   @override
   Widget build(BuildContext context) {
-    final mode = AppTheme.activeMode;
-    final radius = mode == AppThemeMode.neoBrutalism ? 4.0 : 0.0;
-    final iconColor =
-        mode == AppThemeMode.neonTerminal ? AppTheme.cyan : AppTheme.ink;
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.activeMode;
+        final isTerminal = mode == AppThemeMode.neonTerminal;
+        final isRetro = mode == AppThemeMode.retroOS;
+        final borderColor = isTerminal ? theme.cyan : theme.border;
+        final canClaim = game.pendingClaimableEarnings > 0;
 
-    return Tooltip(
-      message: tooltip,
-      child: SizedBox.square(
-        dimension: 28,
-        child: Material(
-          color: Colors.transparent,
+        return Container(
+          decoration: BoxDecoration(
+            color: isRetro ? theme.surfaceHigh : theme.surface,
+            border: Border(
+              top: BorderSide(
+                color: borderColor,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+              ),
+              bottom: BorderSide(
+                color: borderColor,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+              ),
+            ),
+            boxShadow: isTerminal ? theme.softGlow(theme.cyan) : null,
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isTerminal ? Icons.terminal : Icons.storefront,
+                    color: isTerminal ? theme.cyan : theme.accent,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      restaurant.translate('idle_auto_panel_title'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isTerminal ? theme.cyan : theme.ink,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: isTerminal ? 'Courier' : null,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '+${game.formatCoins(game.revenuePerMinute)}/min',
+                    style: TextStyle(
+                      color: theme.accent,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Courier',
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 420;
+                    final itemWidth = compact
+                        ? (constraints.maxWidth - 8) / 2
+                        : (constraints.maxWidth - 24) / 4;
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _AutoMetricChip(
+                          width: itemWidth,
+                          icon: Icons.people_alt,
+                          label: restaurant.translate('idle_business_queue'),
+                          value:
+                              '${game.businessQueueCount}/${game.businessMaxQueue}',
+                        ),
+                        _AutoMetricChip(
+                          width: itemWidth,
+                          icon: Icons.table_restaurant,
+                          label: restaurant.translate('idle_business_tables'),
+                          value:
+                              '${game.businessSeatedCount}/${game.diningCapacity}',
+                        ),
+                        _AutoMetricChip(
+                          width: itemWidth,
+                          icon: Icons.kitchen,
+                          label: restaurant.translate('idle_business_kitchen'),
+                          value: '${game.businessKitchenQueueCount}',
+                        ),
+                        _AutoMetricChip(
+                          width: itemWidth,
+                          icon: Icons.local_dining,
+                          label: restaurant.translate('idle_business_eating'),
+                          value: '${game.businessEatingCount}',
+                        ),
+                        _AutoMetricChip(
+                          width: itemWidth,
+                          icon: Icons.point_of_sale,
+                          label: restaurant.translate('idle_business_checkout'),
+                          value: '${game.businessCheckoutQueueCount}',
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 42,
+                      child: ElevatedButton.icon(
+                        onPressed: canClaim ? onClaim : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              isTerminal ? theme.cyan : theme.accent,
+                          foregroundColor:
+                              isTerminal ? Colors.black : theme.ink,
+                          disabledBackgroundColor: theme.surfaceHigh,
+                          disabledForegroundColor:
+                              theme.ink.withValues(alpha: 0.45),
+                          side: BorderSide(
+                            color: borderColor,
+                            width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              mode == AppThemeMode.neoBrutalism
+                                  ? theme.radius
+                                  : 0,
+                            ),
+                          ),
+                          elevation: 0,
+                        ),
+                        icon: const Icon(Icons.savings, size: 18),
+                        label: Text(
+                          canClaim
+                              ? '+${game.formatCoins(game.pendingClaimableEarnings)}'
+                              : restaurant.translate('idle_auto_running'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    height: 42,
+                    child: OutlinedButton.icon(
+                      onPressed: onRush,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isTerminal ? theme.cyan : theme.ink,
+                        side: BorderSide(
+                          color: borderColor,
+                          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            mode == AppThemeMode.neoBrutalism
+                                ? theme.radius
+                                : 0,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.local_fire_department, size: 18),
+                      label: Text(
+                        restaurant.translate('rush_open_boost'),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AutoMetricChip extends StatelessWidget {
+  final double width;
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _AutoMetricChip({
+    required this.width,
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+
+    return SizedBox(
+      width: width,
+      child: Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+        decoration: BoxDecoration(
+          color: isTerminal
+              ? theme.background.withValues(alpha: 0.38)
+              : theme.surfaceHigh,
+          borderRadius: BorderRadius.circular(
+            mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+          ),
+          border: Border.all(
+            color:
+                isTerminal ? theme.cyan.withValues(alpha: 0.62) : theme.border,
+            width: mode == AppThemeMode.neoBrutalism ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: isTerminal ? theme.cyan : theme.accent, size: 17),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.ink.withValues(alpha: 0.62),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.ink,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Courier',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DockAction {
+  final IconData icon;
+  final String label;
+  final int badgeCount;
+  final void Function(BuildContext context) onTap;
+
+  const _DockAction({
+    required this.icon,
+    required this.label,
+    this.badgeCount = 0,
+    required this.onTap,
+  });
+}
+
+class _DockButton extends StatelessWidget {
+  final _DockAction action;
+
+  const _DockButton({required this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return SizedBox(
+      height: 58,
+      child: Material(
+        color: isTerminal
+            ? theme.background.withValues(alpha: 0.36)
+            : theme.surfaceHigh,
+        borderRadius: BorderRadius.circular(radius),
+        child: InkWell(
+          onTap: () => action.onTap(context),
           borderRadius: BorderRadius.circular(radius),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(radius),
-            child: Icon(icon, color: iconColor, size: 16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(
+                color: isTerminal ? theme.cyan : theme.border,
+                width: mode == AppThemeMode.neoBrutalism ? 2 : 1.5,
+              ),
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        action.icon,
+                        size: 19,
+                        color: isTerminal ? theme.cyan : theme.ink,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        action.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (action.badgeCount > 0)
+                  Positioned(
+                    top: 5,
+                    right: 4,
+                    child: _DockBadge(count: action.badgeCount),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1886,68 +1252,867 @@ class _CartIconButton extends StatelessWidget {
   }
 }
 
-class _CartActionButton extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
+class _GoalClaimChip extends StatelessWidget {
+  final String label;
 
-  const _CartActionButton({
+  const _GoalClaimChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: isTerminal ? theme.cyan : theme.accent,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: isTerminal ? theme.cyan : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 2 : 1,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: isTerminal ? Colors.black : theme.ink,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          fontFamily: 'Courier',
+        ),
+      ),
+    );
+  }
+}
+
+class _DockBadge extends StatelessWidget {
+  final int count;
+
+  const _DockBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final label = count > 9 ? '9+' : count.toString();
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: theme.danger,
+        borderRadius: BorderRadius.circular(
+          mode == AppThemeMode.neoBrutalism ? theme.radius : 999,
+        ),
+        border: Border.all(color: theme.border, width: 1),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+          fontFamily: 'Courier',
+          height: 1,
+        ),
+      ),
+    );
+  }
+}
+
+class _DishBookTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String menuLevelLabel;
+  final String masteryLabel;
+  final String servedLabel;
+  final String rewardLabel;
+  final String costLabel;
+  final double masteryProgress;
+  final String masteryProgressLabel;
+  final bool canAfford;
+  final bool locked;
+  final VoidCallback? onTap;
+
+  const _DishBookTile({
     required this.icon,
-    required this.color,
+    required this.title,
+    required this.menuLevelLabel,
+    required this.masteryLabel,
+    required this.servedLabel,
+    required this.rewardLabel,
+    required this.costLabel,
+    required this.masteryProgress,
+    required this.masteryProgressLabel,
+    required this.canAfford,
+    this.locked = false,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
     final mode = AppTheme.activeMode;
-    final radius = mode == AppThemeMode.neoBrutalism ? 4.0 : 0.0;
     final isTerminal = mode == AppThemeMode.neonTerminal;
-    final isRetro = mode == AppThemeMode.retroOS;
-    final isPaper = mode == AppThemeMode.paperReceipt;
-    final backgroundColor = isTerminal
-        ? color.withValues(alpha: 0.12)
-        : isPaper
-            ? AppTheme.surface
-            : color;
-    final border = isRetro
-        ? Border(
-            top: BorderSide(color: Colors.white, width: 2),
-            left: BorderSide(color: Colors.white, width: 2),
-            right: BorderSide(color: AppTheme.ink, width: 2),
-            bottom: BorderSide(color: AppTheme.ink, width: 2),
-          )
-        : Border.all(
-            color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-            width: isTerminal || isPaper ? 1.5 : 2,
-          );
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+    final borderWidth = mode == AppThemeMode.neoBrutalism ? 3.0 : 1.5;
+    final accent = locked
+        ? theme.ink.withValues(alpha: 0.38)
+        : isTerminal
+            ? theme.cyan
+            : theme.accent;
 
-    return SizedBox.square(
-      dimension: 42,
-      child: Container(
-        decoration: BoxDecoration(
-          boxShadow: mode == AppThemeMode.neoBrutalism
-              ? AppTheme.brutalShadow(offset: Offset(3, 3))
-              : null,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: locked
+              ? theme.border.withValues(alpha: 0.56)
+              : isTerminal
+                  ? theme.cyan
+                  : theme.border,
+          width: borderWidth,
         ),
-        child: Material(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(radius),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(radius),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(radius),
-                border: border,
+        boxShadow: mode == AppThemeMode.neoBrutalism
+            ? theme.hardShadow(offset: const Offset(3, 3))
+            : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 34,
+            child: Icon(icon, color: accent, size: 24),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink.withValues(alpha: locked ? 0.58 : 1),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      rewardLabel,
+                      style: TextStyle(
+                        color: theme.ink.withValues(alpha: locked ? 0.44 : 1),
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Courier',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 4,
+                  children: [
+                    _DishStatText(label: menuLevelLabel),
+                    _DishStatText(label: masteryLabel),
+                    _DishStatText(label: servedLabel),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(radius),
+                        child: LinearProgressIndicator(
+                          minHeight: 6,
+                          value: masteryProgress,
+                          backgroundColor: theme.surfaceHigh,
+                          valueColor: AlwaysStoppedAnimation<Color>(accent),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 32,
+                      child: Text(
+                        masteryProgressLabel,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: theme.ink.withValues(alpha: 0.68),
+                          fontSize: 11,
+                          fontFamily: 'Courier',
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 48,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  costLabel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: theme.ink.withValues(
+                      alpha: canAfford && !locked ? 0.74 : 0.44,
+                    ),
+                    fontSize: 10,
+                    height: 1.12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  height: 34,
+                  child: ElevatedButton(
+                    onPressed: canAfford && !locked ? onTap : null,
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      backgroundColor: accent,
+                      foregroundColor: isTerminal ? Colors.black : theme.ink,
+                      disabledBackgroundColor: theme.surfaceHigh,
+                      disabledForegroundColor:
+                          theme.ink.withValues(alpha: 0.42),
+                      side: BorderSide(
+                        color: isTerminal ? theme.cyan : theme.border,
+                        width: 1.5,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(radius),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: Icon(locked ? Icons.lock : Icons.upgrade, size: 18),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DishStatText extends StatelessWidget {
+  final String label;
+
+  const _DishStatText({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    return Text(
+      label,
+      style: TextStyle(
+        color: theme.ink.withValues(alpha: 0.66),
+        fontSize: 11,
+        height: 1.15,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+}
+
+class _ProgressInfoTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+  final double progress;
+  final String trailingLabel;
+
+  const _ProgressInfoTile({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.progress,
+    required this.trailingLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+    final accent = isTerminal ? theme.cyan : theme.accent;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: isTerminal ? theme.cyan : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+        ),
+        boxShadow: mode == AppThemeMode.neoBrutalism
+            ? theme.hardShadow(offset: const Offset(3, 3))
+            : null,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: accent, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      trailingLabel,
+                      style: TextStyle(
+                        color: theme.ink,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Courier',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.64),
+                    fontSize: 12,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(radius),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: progress,
+                    backgroundColor: theme.surfaceHigh,
+                    valueColor: AlwaysStoppedAnimation<Color>(accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UpgradeTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+  final String trailingLabel;
+  final bool canAfford;
+  final VoidCallback onTap;
+
+  const _UpgradeTile({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.trailingLabel,
+    required this.canAfford,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: isTerminal ? theme.cyan : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+        ),
+        boxShadow: mode == AppThemeMode.neoBrutalism
+            ? theme.hardShadow(offset: const Offset(3, 3))
+            : null,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: isTerminal ? theme.cyan : theme.accent, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.64),
+                    fontSize: 12,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                trailingLabel,
+                style: TextStyle(
+                  color: theme.ink,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'Courier',
+                  fontSize: 12,
+                ),
               ),
-              child: Icon(
-                icon,
-                color: isTerminal ? AppTheme.cyan : AppTheme.ink,
-                size: 21,
+              const SizedBox(height: 6),
+              SizedBox(
+                width: 42,
+                height: 34,
+                child: ElevatedButton(
+                  onPressed: canAfford ? onTap : null,
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    backgroundColor: isTerminal ? theme.cyan : theme.accent,
+                    foregroundColor: isTerminal ? Colors.black : theme.ink,
+                    disabledBackgroundColor: theme.surfaceHigh,
+                    disabledForegroundColor: theme.ink.withValues(alpha: 0.42),
+                    side: BorderSide(
+                      color: isTerminal ? theme.cyan : theme.border,
+                      width: 1.5,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(radius),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Icon(Icons.upgrade, size: 18),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DialogSectionLabel extends StatelessWidget {
+  final String label;
+
+  const _DialogSectionLabel({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        label,
+        style: TextStyle(
+          color: isTerminal ? theme.cyan : theme.ink,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+          fontFamily: 'Courier',
+        ),
+      ),
+    );
+  }
+}
+
+class _StatItem {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _StatItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+}
+
+class _StatsGrid extends StatelessWidget {
+  final List<_StatItem> items;
+
+  const _StatsGrid({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoColumns = constraints.maxWidth >= 420;
+        final itemWidth =
+            twoColumns ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final item in items)
+              SizedBox(
+                width: itemWidth,
+                child: _StatTile(item: item),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  final _StatItem item;
+
+  const _StatTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: isTerminal ? theme.cyan.withValues(alpha: 0.62) : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            item.icon,
+            color: isTerminal ? theme.cyan : theme.accent,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: theme.ink.withValues(alpha: 0.68),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          Text(
+            item.value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: theme.ink,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Courier',
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GoalTile extends StatelessWidget {
+  final GameMilestone milestone;
+  final Restaurant restaurant;
+  final VoidCallback? onClaim;
+
+  const _GoalTile({
+    required this.milestone,
+    required this.restaurant,
+    required this.onClaim,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: milestone.claimable
+              ? theme.accent
+              : isTerminal
+                  ? theme.cyan.withValues(alpha: 0.62)
+                  : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
         ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            milestone.claimed ? Icons.check_circle : Icons.flag,
+            color: milestone.claimable ? theme.accent : theme.ink,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  restaurant.translate(milestone.titleKey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  restaurant.translate(milestone.descriptionKey),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.64),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(radius),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: milestone.progressRatio,
+                    backgroundColor: theme.surfaceHigh,
+                    valueColor: AlwaysStoppedAnimation<Color>(theme.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 84,
+            height: 38,
+            child: ElevatedButton(
+              onPressed: onClaim,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                backgroundColor: isTerminal ? theme.cyan : theme.accent,
+                foregroundColor: isTerminal ? Colors.black : theme.ink,
+                disabledBackgroundColor: theme.surfaceHigh,
+                disabledForegroundColor: theme.ink.withValues(alpha: 0.5),
+                side: BorderSide(
+                  color: isTerminal ? theme.cyan : theme.border,
+                  width: 1.5,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(radius),
+                ),
+                elevation: 0,
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  milestone.claimed
+                      ? restaurant.translate('idle_claimed')
+                      : restaurant.translate('idle_claim'),
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DailyTaskTile extends StatelessWidget {
+  final GameDailyTask task;
+  final Restaurant restaurant;
+  final VoidCallback? onClaim;
+
+  const _DailyTaskTile({
+    required this.task,
+    required this.restaurant,
+    required this.onClaim,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: task.claimable
+              ? theme.accent
+              : isTerminal
+                  ? theme.cyan.withValues(alpha: 0.62)
+                  : theme.border,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            task.claimed ? Icons.check_circle : Icons.today,
+            color: task.claimable ? theme.accent : theme.ink,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        restaurant.translate(task.titleKey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.ink,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${task.progress}/${task.target}',
+                      style: TextStyle(
+                        color: theme.ink.withValues(alpha: 0.72),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Courier',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  restaurant.translate(task.descriptionKey),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.64),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(radius),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: task.progressRatio,
+                    backgroundColor: theme.surfaceHigh,
+                    valueColor: AlwaysStoppedAnimation<Color>(theme.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 84,
+            height: 38,
+            child: ElevatedButton(
+              onPressed: onClaim,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                backgroundColor: isTerminal ? theme.cyan : theme.accent,
+                foregroundColor: isTerminal ? Colors.black : theme.ink,
+                disabledBackgroundColor: theme.surfaceHigh,
+                disabledForegroundColor: theme.ink.withValues(alpha: 0.5),
+                side: BorderSide(
+                  color: isTerminal ? theme.cyan : theme.border,
+                  width: 1.5,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(radius),
+                ),
+                elevation: 0,
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  task.claimed
+                      ? restaurant.translate('idle_claimed')
+                      : restaurant.translate('idle_claim'),
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
