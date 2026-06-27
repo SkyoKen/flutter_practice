@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/pages/home_page.dart';
-import 'package:test_app/models/restaurant.dart';
+import 'package:cyber_table_order/pages/home_page.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
 
 class IntroPage extends StatelessWidget {
   const IntroPage({super.key});
@@ -27,7 +27,7 @@ class IntroPage extends StatelessWidget {
                       color: Colors.deepOrangeAccent,
                       shadows: [
                         BoxShadow(
-                          color: Colors.deepOrange.withOpacity(0.8),
+                          color: Colors.deepOrange.withValues(alpha: 0.8),
                           blurRadius: 20,
                         ),
                       ],
@@ -77,7 +77,7 @@ class IntroPage extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4), // 方正的科幻风按钮
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.deepOrange.withOpacity(0.6),
+                              color: Colors.deepOrange.withValues(alpha: 0.6),
                               blurRadius: 15,
                               offset: const Offset(0, 5),
                             )

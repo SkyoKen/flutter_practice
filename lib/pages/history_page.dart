@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/models/food.dart';
-import 'package:test_app/models/restaurant.dart';
+import 'package:cyber_table_order/models/food.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -19,7 +19,7 @@ class HistoryPage extends StatelessWidget {
           // 菜名和数量
           Expanded(
             child: Text(
-              '${food.name}',
+              food.name,
               style: const TextStyle(color: Colors.white, fontSize: 14),
               overflow: TextOverflow.ellipsis,
             ),
@@ -97,7 +97,7 @@ class HistoryPage extends StatelessWidget {
                   color: const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                      color: Colors.deepOrangeAccent.withOpacity(0.5)),
+                      color: Colors.deepOrangeAccent.withValues(alpha: 0.5)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -155,10 +155,12 @@ class HistoryPage extends StatelessWidget {
                               color: const Color(0xFF1E1E1E),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                  color: Colors.blueAccent.withOpacity(0.5)),
+                                  color:
+                                      Colors.blueAccent.withValues(alpha: 0.5)),
                               boxShadow: [
                                 BoxShadow(
-                                    color: Colors.blueAccent.withOpacity(0.1),
+                                    color: Colors.blueAccent
+                                        .withValues(alpha: 0.1),
                                     blurRadius: 8)
                               ],
                             ),

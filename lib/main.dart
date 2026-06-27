@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/models/restaurant.dart';
-import 'package:test_app/pages/intro_page.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
+import 'package:cyber_table_order/pages/intro_page.dart';
 
 void main() {
   runApp(const MyApp());

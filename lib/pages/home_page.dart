@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/pages/menu_page.dart';
-import 'package:test_app/models/restaurant.dart';
-import 'package:test_app/models/food.dart';
+import 'package:cyber_table_order/pages/menu_page.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
+import 'package:cyber_table_order/models/food.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
 import 'package:qr_flutter/qr_flutter.dart'; // 确保已添加 qr_flutter 依赖
@@ -16,13 +16,20 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final String _tableId =
-      "T-0" + Random().nextInt(100).toString().padLeft(2, '0');
+      "T-0${Random().nextInt(100).toString().padLeft(2, '0')}";
 
   static const String _appVersion = "1.3.0";
   static const String _buildNumber = "20250524";
 
   final TextEditingController _memberIdController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _memberIdController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   // ----------------------------------------------------------------------
   // 登录弹窗逻辑
@@ -57,7 +64,7 @@ class _HomePageState extends State<HomePage> {
                   decoration: InputDecoration(
                     labelText: restaurant.translate('member_id'),
                     labelStyle: TextStyle(
-                        color: Colors.deepOrangeAccent.withOpacity(0.8),
+                        color: Colors.deepOrangeAccent.withValues(alpha: 0.8),
                         fontFamily: 'Courier'),
                     hintText: 'e.g. 123456',
                     hintStyle: TextStyle(color: Colors.grey[700]),
@@ -80,7 +87,7 @@ class _HomePageState extends State<HomePage> {
                   decoration: InputDecoration(
                     labelText: restaurant.translate('password'),
                     labelStyle: TextStyle(
-                        color: Colors.deepOrangeAccent.withOpacity(0.8),
+                        color: Colors.deepOrangeAccent.withValues(alpha: 0.8),
                         fontFamily: 'Courier'),
                     hintText: '******',
                     hintStyle: TextStyle(color: Colors.grey[700]),
@@ -516,10 +523,8 @@ class _HomePageState extends State<HomePage> {
                               maxLines: 1,
                               overflow: TextOverflow.clip,
                             ),
-                            ...items.entries
-                                .map((entry) =>
-                                    _buildOrderItemRow(entry.key, entry.value))
-                                .toList(),
+                            ...items.entries.map((entry) =>
+                                _buildOrderItemRow(entry.key, entry.value)),
                           ],
                         ),
                       );
@@ -581,7 +586,7 @@ class _HomePageState extends State<HomePage> {
 
   // 会员信息弹窗
   void _buildMemberProfileDialog(BuildContext context, Restaurant restaurant) {
-    Widget _buildInfoRow(
+    Widget buildInfoRow(
         IconData icon, String label, String value, Color color) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -625,12 +630,9 @@ class _HomePageState extends State<HomePage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildInfoRow(
-                    Icons.person_pin,
-                    restaurant.translate('nickname'),
-                    restaurant.getUserName.toUpperCase(),
-                    Colors.deepOrange),
-                _buildInfoRow(
+                buildInfoRow(Icons.person_pin, restaurant.translate('nickname'),
+                    restaurant.getUserName.toUpperCase(), Colors.deepOrange),
+                buildInfoRow(
                     Icons.credit_card,
                     restaurant.translate('member_id'),
                     restaurant.getMemberId,
@@ -645,43 +647,41 @@ class _HomePageState extends State<HomePage> {
                       fontFamily: 'Courier'),
                 ),
                 const SizedBox(height: 10),
-                ...restaurant.getCoupons
-                    .map((coupon) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.4),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                  color: Colors.deepOrange.withOpacity(0.5)),
+                ...restaurant.getCoupons.map((coupon) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                              color: Colors.deepOrange.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Icon(Icons.star,
+                                color: Colors.amber, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(coupon,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'Courier')),
                             ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Icon(Icons.star,
-                                    color: Colors.amber, size: 16),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(coupon,
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontFamily: 'Courier')),
-                                ),
-                                TextButton(
-                                  onPressed: () {},
-                                  child: Text(restaurant.translate('use'),
-                                      style: const TextStyle(
-                                          color: Colors.deepOrangeAccent,
-                                          fontSize: 12)),
-                                ),
-                              ],
+                            TextButton(
+                              onPressed: () {},
+                              child: Text(restaurant.translate('use'),
+                                  style: const TextStyle(
+                                      color: Colors.deepOrangeAccent,
+                                      fontSize: 12)),
                             ),
-                          ),
-                        ))
-                    .toList(),
+                          ],
+                        ),
+                      ),
+                    )),
               ],
             ),
           ),
@@ -715,27 +715,36 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Consumer<Restaurant>(
       builder: (context, restaurant, child) {
+        final compactAppBar = MediaQuery.sizeOf(context).width < 700;
+
         return Scaffold(
           backgroundColor: const Color(0xFF121212),
           appBar: AppBar(
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.qr_code_2,
-                    color: Colors.deepOrangeAccent, size: 20),
-                const SizedBox(width: 8),
-                Text("ACCESS ID: $_tableId",
+            title: compactAppBar
+                ? Text(_tableId,
                     style: const TextStyle(
                         color: Colors.white,
                         fontFamily: 'Courier',
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold)),
-              ],
-            ),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold))
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.qr_code_2,
+                          color: Colors.deepOrangeAccent, size: 20),
+                      const SizedBox(width: 8),
+                      Text("ACCESS ID: $_tableId",
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontFamily: 'Courier',
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
             centerTitle: true,
             backgroundColor: const Color(0xFF1E1E1E),
             elevation: 4,
-            shadowColor: Colors.deepOrange.withOpacity(0.5),
+            shadowColor: Colors.deepOrange.withValues(alpha: 0.5),
             leading: Builder(
               builder: (context) => IconButton(
                 icon:
@@ -745,37 +754,56 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             actions: [
-              TextButton.icon(
-                onPressed: () => _showQrCodeDialog(context),
-                icon: const Icon(Icons.qr_code_scanner,
-                    color: Colors.blueAccent, size: 20),
-                label: Text(restaurant.translate('mobile_qr'),
-                    style: const TextStyle(
-                        color: Colors.blueAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold)),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+              if (compactAppBar)
+                IconButton(
+                  onPressed: () => _showQrCodeDialog(context),
+                  icon: const Icon(Icons.qr_code_scanner,
+                      color: Colors.blueAccent, size: 20),
+                  tooltip: restaurant.translate('mobile_qr'),
+                )
+              else
+                TextButton.icon(
+                  onPressed: () => _showQrCodeDialog(context),
+                  icon: const Icon(Icons.qr_code_scanner,
+                      color: Colors.blueAccent, size: 20),
+                  label: Text(restaurant.translate('mobile_qr'),
+                      style: const TextStyle(
+                          color: Colors.blueAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                 ),
-              ),
-              TextButton.icon(
-                onPressed: () => _callWaiter(context),
-                icon: const Icon(
-                  Icons.notifications_active,
-                  color: Colors.amberAccent,
-                  size: 20,
+              if (compactAppBar)
+                IconButton(
+                  onPressed: () => _callWaiter(context),
+                  icon: const Icon(
+                    Icons.notifications_active,
+                    color: Colors.amberAccent,
+                    size: 20,
+                  ),
+                  tooltip: restaurant.translate('help'),
+                )
+              else
+                TextButton.icon(
+                  onPressed: () => _callWaiter(context),
+                  icon: const Icon(
+                    Icons.notifications_active,
+                    color: Colors.amberAccent,
+                    size: 20,
+                  ),
+                  label: Text(restaurant.translate('help'),
+                      style: const TextStyle(
+                          color: Colors.amberAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                 ),
-                label: Text(restaurant.translate('help'),
-                    style: const TextStyle(
-                        color: Colors.amberAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold)),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-              ),
               Padding(
-                padding: const EdgeInsets.only(right: 15.0),
+                padding: EdgeInsets.only(right: compactAppBar ? 4.0 : 15.0),
                 child: IconButton(
                   onPressed: restaurant.getIsLoggedIn
                       ? () => _buildMemberProfileDialog(context, restaurant)
@@ -806,7 +834,7 @@ class _HomePageState extends State<HomePage> {
                         color: const Color(0xFF0A0A0A),
                         border: Border(
                             bottom: BorderSide(
-                                color: Colors.deepOrange.withOpacity(0.5),
+                                color: Colors.deepOrange.withValues(alpha: 0.5),
                                 width: 1.0)),
                       ),
                       child: Row(

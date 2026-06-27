@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/components/food_tile.dart';
-import 'package:test_app/models/food.dart';
-import 'package:test_app/models/restaurant.dart';
+import 'package:cyber_table_order/components/food_tile.dart';
+import 'package:cyber_table_order/models/food.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:intl/intl.dart';
 
 class MenuPage extends StatefulWidget {
@@ -81,7 +81,7 @@ class _MenuPageState extends State<MenuPage> {
       grandTotal += double.tryParse(order['totalPrice']!) ?? 0.0;
     }
 
-    Widget _buildOrderItemRow(Food food, int quantity) {
+    Widget buildOrderItemRow(Food food, int quantity) {
       double itemPrice = (double.tryParse(food.price) ?? 0.0);
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 8.0),
@@ -90,7 +90,7 @@ class _MenuPageState extends State<MenuPage> {
           children: [
             Expanded(
               child: Text(
-                '${food.name}',
+                food.name,
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -173,7 +173,7 @@ class _MenuPageState extends State<MenuPage> {
                         margin: const EdgeInsets.only(bottom: 15),
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.4),
+                          color: Colors.black.withValues(alpha: 0.4),
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(color: Colors.white10),
                         ),
@@ -195,10 +195,8 @@ class _MenuPageState extends State<MenuPage> {
                               ],
                             ),
                             const Divider(color: Colors.white10, height: 10),
-                            ...items.entries
-                                .map((entry) =>
-                                    _buildOrderItemRow(entry.key, entry.value))
-                                .toList(),
+                            ...items.entries.map((entry) =>
+                                buildOrderItemRow(entry.key, entry.value)),
                           ],
                         ),
                       );
@@ -255,7 +253,7 @@ class _MenuPageState extends State<MenuPage> {
                 padding: const EdgeInsets.all(8),
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
+                    color: Colors.red.withValues(alpha: 0.1),
                     border: Border.all(color: Colors.redAccent),
                     borderRadius: BorderRadius.circular(4)),
                 child: Row(
@@ -386,7 +384,7 @@ class _MenuPageState extends State<MenuPage> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('${food.name}',
+                            Text(food.name,
                                 style: const TextStyle(color: Colors.white70)),
                             Text('x$quantity',
                                 style:
@@ -450,14 +448,22 @@ class _MenuPageState extends State<MenuPage> {
   }
 
   // 购物车侧边栏组件
-  Widget _buildCartSidePanel(BuildContext context, Restaurant restaurant) {
+  Widget _buildCartSidePanel(
+    BuildContext context,
+    Restaurant restaurant, {
+    bool compact = false,
+  }) {
     final uniqueItems = restaurant.getUniqueCartItems();
     final totalPrice = restaurant.getTotalPrice();
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-        border: Border(left: BorderSide(color: Colors.deepOrange, width: 2)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        border: compact
+            ? const Border(top: BorderSide(color: Colors.deepOrange, width: 2))
+            : const Border(
+                left: BorderSide(color: Colors.deepOrange, width: 2),
+              ),
       ),
       padding: const EdgeInsets.all(12), // Padding reduced to save space
       child: Column(
@@ -515,7 +521,7 @@ class _MenuPageState extends State<MenuPage> {
                                   onTap: () => restaurant.removeFromCart(food),
                                   child: Container(
                                     padding: const EdgeInsets.all(4),
-                                    color: Colors.red.withOpacity(0.2),
+                                    color: Colors.red.withValues(alpha: 0.2),
                                     child: const Icon(Icons.remove,
                                         size: 16, color: Colors.white),
                                   ),
@@ -523,7 +529,7 @@ class _MenuPageState extends State<MenuPage> {
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8.0),
-                                  child: Text('${quantity}',
+                                  child: Text('$quantity',
                                       style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold)),
@@ -532,7 +538,7 @@ class _MenuPageState extends State<MenuPage> {
                                   onTap: () => restaurant.addToCart(food),
                                   child: Container(
                                     padding: const EdgeInsets.all(4),
-                                    color: Colors.green.withOpacity(0.2),
+                                    color: Colors.green.withValues(alpha: 0.2),
                                     child: const Icon(Icons.add,
                                         size: 16, color: Colors.white),
                                   ),
@@ -568,7 +574,7 @@ class _MenuPageState extends State<MenuPage> {
                             padding:
                                 const EdgeInsets.all(8), // Padding optimized
                             decoration: BoxDecoration(
-                              color: Colors.blueAccent.withOpacity(0.1),
+                              color: Colors.blueAccent.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
                                   color: Colors.blueAccent, width: 1.5),
@@ -588,7 +594,7 @@ class _MenuPageState extends State<MenuPage> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 8),
                             decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.1),
+                              color: Colors.amber.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                               border:
                                   Border.all(color: Colors.amber, width: 1.5),
@@ -666,7 +672,8 @@ class _MenuPageState extends State<MenuPage> {
                           ? null
                           : [
                               BoxShadow(
-                                  color: Colors.deepOrange.withOpacity(0.5),
+                                  color:
+                                      Colors.deepOrange.withValues(alpha: 0.5),
                                   blurRadius: 8)
                             ]),
                   child: Center(
@@ -693,6 +700,192 @@ class _MenuPageState extends State<MenuPage> {
     );
   }
 
+  int _menuColumnCount(double width) {
+    if (width >= 900) return 3;
+    if (width >= 560) return 2;
+    return 1;
+  }
+
+  Widget _buildMainCategoryButton(
+    Restaurant restaurant,
+    Map<String, String> category,
+    bool isSelected,
+  ) {
+    return GestureDetector(
+      onTap: () => _onMainCategoryTap(category['id']!),
+      child: Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? Colors.deepOrange.withValues(alpha: 0.08)
+              : Colors.transparent,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              restaurant.translate(category['key']!),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isSelected ? Colors.deepOrangeAccent : Colors.grey[600],
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Courier',
+                fontSize: 13,
+                letterSpacing: 1.0,
+                shadows: isSelected
+                    ? [
+                        const Shadow(
+                          color: Colors.deepOrange,
+                          blurRadius: 8,
+                        )
+                      ]
+                    : [],
+              ),
+            ),
+            if (isSelected)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                height: 2,
+                width: 20,
+                decoration: BoxDecoration(
+                  color: Colors.deepOrangeAccent,
+                  boxShadow: const [
+                    BoxShadow(color: Colors.deepOrange, blurRadius: 5)
+                  ],
+                ),
+              )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuArea(
+    Restaurant restaurant,
+    List<Food> currentMenu,
+    List<Map<String, String>> currentSubCategories,
+    double width,
+  ) {
+    final columnCount = _menuColumnCount(width);
+    final useScrollableCategories = width < 720;
+
+    return Column(
+      children: [
+        Container(
+          height: 70,
+          decoration: const BoxDecoration(
+            color: Color(0xFF1E1E1E),
+            border: Border(
+              bottom: BorderSide(color: Colors.deepOrange, width: 2),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.deepOrangeAccent,
+                blurRadius: 10,
+                offset: Offset(0, 1),
+              )
+            ],
+          ),
+          child: useScrollableCategories
+              ? ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: _categories.map((cat) {
+                    final isSelected = cat['id'] == _selectedCategory;
+                    return SizedBox(
+                      width: 104,
+                      child:
+                          _buildMainCategoryButton(restaurant, cat, isSelected),
+                    );
+                  }).toList(),
+                )
+              : Row(
+                  children: _categories.map((cat) {
+                    final isSelected = cat['id'] == _selectedCategory;
+                    return Expanded(
+                      child:
+                          _buildMainCategoryButton(restaurant, cat, isSelected),
+                    );
+                  }).toList(),
+                ),
+        ),
+        Container(
+          height: currentSubCategories.isEmpty ? 0 : 60,
+          width: double.infinity,
+          color: const Color(0xFF121212),
+          alignment: Alignment.centerLeft,
+          child: currentSubCategories.isEmpty
+              ? Container()
+              : ListView.builder(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: currentSubCategories.length,
+                  itemBuilder: (context, index) {
+                    final subCat = currentSubCategories[index];
+                    final subCatId = subCat['id']!;
+                    final isMainCategorySelected =
+                        subCatId == _selectedCategory &&
+                            _selectedSubCategoryTag.isEmpty;
+                    final isSubTagSelected =
+                        subCatId == _selectedSubCategoryTag;
+                    final isSelected =
+                        isMainCategorySelected || isSubTagSelected;
+
+                    return GestureDetector(
+                      onTap: () => _onSubCategoryTap(subCatId),
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.deepOrange
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: isSelected
+                                ? Colors.deepOrange
+                                : Colors.grey[800]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Text(
+                          restaurant.translate(subCat['key']!),
+                          style: TextStyle(
+                            color: isSelected ? Colors.black : Colors.grey[500],
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        Expanded(
+          child: Container(
+            decoration: const BoxDecoration(color: Color(0xFF0A0A0A)),
+            child: GridView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: currentMenu.length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columnCount,
+                childAspectRatio: 1.0,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+              ),
+              itemBuilder: (context, index) {
+                return FoodTile(food: currentMenu[index]);
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<Restaurant>(
@@ -706,192 +899,64 @@ class _MenuPageState extends State<MenuPage> {
         final List<Map<String, String>> currentSubCategories =
             _subCategoryMap[_selectedCategory] ?? [];
 
-        // 修复：使用新的 getter 检查购物车是否为空
-        final bool isCartEmpty = restaurant.getUniqueCartItems().isEmpty;
-
         return Scaffold(
-          backgroundColor: const Color(0xFF121212), // 全局深黑背景
-          body: Row(
-            children: [
-              // ------------------------------------------------
-              // 左侧 - 菜单区域 (80% 宽度)
-              // ------------------------------------------------
-              Expanded(
-                flex: 4, // 菜单占据约 80% 屏幕宽度
-                child: Column(
+          backgroundColor: const Color(0xFF121212),
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 900;
+
+              if (isWide) {
+                return Row(
                   children: [
-                    // 1. 顶部一级分类栏
-                    Container(
-                      height: 70,
-                      decoration: const BoxDecoration(
-                          color: Color(0xFF1E1E1E),
-                          border: Border(
-                              bottom: BorderSide(
-                                  color: Colors.deepOrange, width: 2)), // 底部亮条
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.deepOrangeAccent,
-                                blurRadius: 10,
-                                offset: Offset(0, 1)) // 霓虹底光
-                          ]),
-                      child: Row(
-                        children: _categories.map((cat) {
-                          bool isSelected = cat['id'] == _selectedCategory;
-                          return Expanded(
-                            child: GestureDetector(
-                              onTap: () => _onMainCategoryTap(cat['id']!),
-                              child: Container(
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? Colors.deepOrange.withOpacity(0.08)
-                                      : Colors.transparent,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      restaurant.translate(cat['key']!),
-                                      style: TextStyle(
-                                        color: isSelected
-                                            ? Colors.deepOrangeAccent
-                                            : Colors.grey[600],
-                                        fontWeight: FontWeight.bold,
-                                        fontFamily: 'Courier',
-                                        fontSize: 13,
-                                        letterSpacing: 1.0,
-                                        shadows: isSelected
-                                            ? [
-                                                const Shadow(
-                                                    color: Colors.deepOrange,
-                                                    blurRadius: 8)
-                                              ]
-                                            : [],
-                                      ),
-                                    ),
-                                    // 选中指示器 (发光短横线)
-                                    if (isSelected)
-                                      Container(
-                                        margin: const EdgeInsets.only(top: 4),
-                                        height: 2,
-                                        width: 20,
-                                        decoration: BoxDecoration(
-                                            color: Colors.deepOrangeAccent,
-                                            boxShadow: const [
-                                              BoxShadow(
-                                                  color: Colors.deepOrange,
-                                                  blurRadius: 5)
-                                            ]),
-                                      )
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-
-                    // 2. 二级分类栏
-                    Container(
-                      height: currentSubCategories.isEmpty ? 0 : 60, // 高度动态变化
-                      width: double.infinity,
-                      color: const Color(0xFF121212),
-                      alignment: Alignment.centerLeft,
-                      // 只有当前分类有子分类时才显示
-                      child: currentSubCategories.isEmpty
-                          ? Container()
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
-                              scrollDirection: Axis.horizontal,
-                              itemCount: currentSubCategories.length,
-                              itemBuilder: (context, index) {
-                                final subCat = currentSubCategories[index];
-                                final subCatId = subCat['id']!;
-
-                                // 判断是否选中：如果是主分类ID（如fish），且当前没有更精确的子标签被选中
-                                bool isMainCategorySelected =
-                                    subCatId == _selectedCategory &&
-                                        _selectedSubCategoryTag.isEmpty;
-                                // 判断是否选中：如果是精确的子标签
-                                bool isSubTagSelected =
-                                    subCatId == _selectedSubCategoryTag;
-
-                                bool isSelected =
-                                    isMainCategorySelected || isSubTagSelected;
-
-                                return GestureDetector(
-                                  onTap: () => _onSubCategoryTap(subCatId),
-                                  child: Container(
-                                    margin: const EdgeInsets.only(right: 12),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 20),
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Colors.deepOrange
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(
-                                          color: isSelected
-                                              ? Colors.deepOrange
-                                              : Colors.grey[800]!,
-                                          width: 1.5),
-                                    ),
-                                    child: Text(
-                                      restaurant.translate(subCat['key']!),
-                                      style: TextStyle(
-                                        color: isSelected
-                                            ? Colors.black
-                                            : Colors.grey[500],
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-
-                    // 3. 菜品网格区域 (暗黑背景 + 网格)
                     Expanded(
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0A0A0A),
-                        ),
-                        child: GridView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: currentMenu.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 1.0,
-                            crossAxisSpacing: 16,
-                            mainAxisSpacing: 16,
-                          ),
-                          itemBuilder: (context, index) {
-                            return FoodTile(
-                              food: currentMenu[index],
-                              // 移除了 onTap，现在 FoodTile 内部直接处理逻辑
-                            );
-                          },
-                        ),
+                      flex: 4,
+                      child: LayoutBuilder(
+                        builder: (context, menuConstraints) {
+                          return _buildMenuArea(
+                            restaurant,
+                            currentMenu,
+                            currentSubCategories,
+                            menuConstraints.maxWidth,
+                          );
+                        },
                       ),
+                    ),
+                    Expanded(
+                      flex: 1,
+                      child: _buildCartSidePanel(context, restaurant),
                     ),
                   ],
-                ),
-              ),
+                );
+              }
 
-              // ------------------------------------------------
-              // 右侧 - 购物车面板 (20% 宽度)
-              // ------------------------------------------------
-              Expanded(
-                flex: 1, // 购物车占据约 20% 屏幕宽度
-                child: _buildCartSidePanel(context, restaurant),
-              ),
-            ],
+              final cartHeight =
+                  (constraints.maxHeight * 0.38).clamp(260.0, 360.0).toDouble();
+
+              return Column(
+                children: [
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, menuConstraints) {
+                        return _buildMenuArea(
+                          restaurant,
+                          currentMenu,
+                          currentSubCategories,
+                          menuConstraints.maxWidth,
+                        );
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    height: cartHeight,
+                    child: _buildCartSidePanel(
+                      context,
+                      restaurant,
+                      compact: true,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         );
       },

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_app/models/food.dart';
-import 'package:test_app/models/restaurant.dart';
+import 'package:cyber_table_order/models/food.dart';
+import 'package:cyber_table_order/models/restaurant.dart';
 
 class FoodTile extends StatelessWidget {
   final Food food;
@@ -24,7 +24,7 @@ class FoodTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           boxShadow: [
             BoxShadow(
-              color: color.withOpacity(0.4),
+              color: color.withValues(alpha: 0.4),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -54,7 +54,7 @@ class FoodTile extends StatelessWidget {
             boxShadow: isInCart
                 ? [
                     BoxShadow(
-                        color: Colors.deepOrange.withOpacity(0.2),
+                        color: Colors.deepOrange.withValues(alpha: 0.2),
                         blurRadius: 10)
                   ]
                 : null,
@@ -74,7 +74,7 @@ class FoodTile extends StatelessWidget {
                       child: Icon(
                         Icons.fastfood,
                         size: 60,
-                        color: Colors.deepOrange[300]!.withOpacity(0.5),
+                        color: Colors.deepOrange[300]!.withValues(alpha: 0.5),
                       ),
                     ),
                   ),
