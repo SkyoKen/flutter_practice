@@ -19,7 +19,7 @@ void main() {
 
     await tester.pumpWidget(const MyApp());
 
-    expect(find.text('CYBER TABLE ORDER'), findsOneWidget);
+    expect(find.text('TABLE NOVA'), findsOneWidget);
     expect(find.text('START SESSION'), findsOneWidget);
 
     await tester.tap(find.text('START SESSION'));

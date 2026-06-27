@@ -687,7 +687,7 @@ class _HomePageState extends State<HomePage> {
       case AppThemeMode.paperReceipt:
         return compact ? 'TABLE $_tableId' : 'ORDER SLIP // TABLE $_tableId';
       case AppThemeMode.retroOS:
-        return compact ? _tableId : 'Cyber Table Order - $_tableId';
+        return compact ? _tableId : 'TABLE NOVA - $_tableId';
       case AppThemeMode.neoBrutalism:
         return compact ? _tableId : 'ACCESS ID: $_tableId';
     }

@@ -1,7 +1,7 @@
 class Translations {
   static final Map<String, Map<String, String>> _localizedValues = {
     'en': {
-      'app_title': 'CYBER TABLE ORDER',
+      'app_title': 'TABLE NOVA',
       'start_session': 'START SESSION',
       'accessing_logs': '// ACCESSING SYSTEM LOGS\nINITIATE ORDER SEQUENCE',
       'member_login': 'MEMBER LOGIN',
@@ -213,7 +213,7 @@ class Translations {
       'stat_favorite_dish': 'Favorite dish',
     },
     'zh': {
-      'app_title': 'CYBER TABLE ORDER',
+      'app_title': 'TABLE NOVA',
       'start_session': '开始点餐',
       'accessing_logs': '// 正在访问系统日志\n初始化订单序列',
       'member_login': '会员登录',
@@ -423,7 +423,7 @@ class Translations {
       'stat_favorite_dish': '最常服务',
     },
     'ja': {
-      'app_title': 'CYBER TABLE ORDER',
+      'app_title': 'TABLE NOVA',
       'start_session': '注文を開始',
       'accessing_logs': '// システムログにアクセス中\n注文シーケンスを開始します',
       'member_login': '会員ログイン',
