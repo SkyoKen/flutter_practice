@@ -9,6 +9,7 @@ build/
 # Dartdoc and coverage output
 doc/api/
 coverage/
+devtools_options.yaml
 
 # Local environment files
 .env*
