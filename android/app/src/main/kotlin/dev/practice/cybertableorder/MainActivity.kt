@@ -1,4 +1,4 @@
-package com.example.test_app
+package dev.practice.cybertableorder
 
 import io.flutter.embedding.android.FlutterActivity
 

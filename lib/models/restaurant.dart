@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:test_app/models/food.dart';
-import 'package:test_app/utils/translations.dart'; // 导入 Translations
+import 'package:cyber_table_order/models/food.dart';
+import 'package:cyber_table_order/utils/translations.dart'; // 导入 Translations
 import 'dart:math';
 
 class Restaurant extends ChangeNotifier {
@@ -23,7 +23,7 @@ class Restaurant extends ChangeNotifier {
   bool _isLoggedIn = false;
   String _userName = "GUEST"; // Default state
   String _memberId = "GC-0000"; // Simulated Member ID
-  List<String> _coupons = [
+  final List<String> _coupons = [
     "FREE RAMEN",
     "20% OFF",
     "10 OFF 100"
@@ -32,7 +32,7 @@ class Restaurant extends ChangeNotifier {
   bool get getIsLoggedIn => _isLoggedIn;
   String get getUserName => _userName;
   String get getMemberId => _memberId;
-  List<String> get getCoupons => _coupons;
+  List<String> get getCoupons => List.unmodifiable(_coupons);
 
   void login(String memberId, String userName) {
     _isLoggedIn = true;
@@ -144,7 +144,7 @@ class Restaurant extends ChangeNotifier {
 
   // 获取菜单
   List<Food> getMenu() {
-    return _menu;
+    return List.unmodifiable(_menu);
   }
 
   // 获取购物车中的唯一 Food 列表 (用于 CartPage 显示)
@@ -159,12 +159,12 @@ class Restaurant extends ChangeNotifier {
 
   // 获取订单历史记录
   List<Map<String, dynamic>> getOrderHistory() {
-    return _orderHistory;
+    return List.unmodifiable(_orderHistory);
   }
 
   // 根据 tag 筛选菜单
   List<Food> getMenuByTag(String tag) {
-    if (tag.isEmpty) return _menu;
+    if (tag.isEmpty) return getMenu();
     // 检查 food.tags 是否包含传入的 tag
     return _menu.where((food) => food.tags.contains(tag)).toList();
   }
