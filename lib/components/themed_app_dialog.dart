@@ -145,12 +145,22 @@ class ThemedAppDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
+    final mode = AppTheme.activeMode;
+    final dialogMaxHeight = MediaQuery.sizeOf(context).height - 48;
+    final actionBackground =
+        mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface;
+    final actionBorderColor = mode == AppThemeMode.neonTerminal
+        ? theme.cyan.withValues(alpha: 0.34)
+        : theme.border.withValues(alpha: 0.24);
 
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth),
+        constraints: BoxConstraints(
+          maxWidth: maxWidth,
+          maxHeight: dialogMaxHeight,
+        ),
         child: Container(
           decoration: _decoration(theme),
           child: Column(
@@ -165,15 +175,23 @@ class ThemedAppDialog extends StatelessWidget {
                 ),
               ),
               if (actions.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-                  child: Row(
-                    children: [
-                      for (var index = 0; index < actions.length; index++) ...[
-                        if (index > 0) const SizedBox(width: 10),
-                        Expanded(child: actions[index]),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: actionBackground,
+                    border: Border(top: BorderSide(color: actionBorderColor)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 16),
+                    child: Row(
+                      children: [
+                        for (var index = 0;
+                            index < actions.length;
+                            index++) ...[
+                          if (index > 0) const SizedBox(width: 10),
+                          Expanded(child: actions[index]),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
             ],
