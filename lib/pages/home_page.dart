@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cyber_table_order/components/order_history_dialog.dart';
 import 'package:cyber_table_order/components/themed_app_dialog.dart';
+import 'package:cyber_table_order/models/game_controller.dart';
 import 'package:cyber_table_order/pages/menu_page.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
@@ -365,6 +366,13 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
               _buildSettingItem(context, "Notifications", "Enabled"),
+              SizedBox(height: 12),
+              ThemedDialogButton(
+                label: restaurant.translate('reset_idle_save'),
+                icon: Icons.restart_alt,
+                destructive: true,
+                onPressed: () => _resetIdleSave(context),
+              ),
               Divider(color: theme.ink.withValues(alpha: 0.2), height: 30),
               Text("ABOUT APP",
                   style: TextStyle(
@@ -445,6 +453,29 @@ class _HomePageState extends State<HomePage> {
       selected: controller.mode == mode,
       minWidth: 132,
       onTap: () => controller.setMode(mode),
+    );
+  }
+
+  Future<void> _resetIdleSave(BuildContext context) async {
+    final game = context.read<GameController>();
+    final restaurant = context.read<Restaurant>();
+    await game.reset();
+    if (!context.mounted) return;
+    final theme = AppTheme.of(context);
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: theme.surfaceHigh,
+        content: Text(
+          restaurant.translate('idle_save_reset'),
+          style: TextStyle(
+            color: theme.ink,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Courier',
+          ),
+        ),
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 
@@ -656,7 +687,7 @@ class _HomePageState extends State<HomePage> {
       case AppThemeMode.paperReceipt:
         return compact ? 'TABLE $_tableId' : 'ORDER SLIP // TABLE $_tableId';
       case AppThemeMode.retroOS:
-        return compact ? _tableId : 'Cyber Table Order - $_tableId';
+        return compact ? _tableId : 'TABLE NOVA - $_tableId';
       case AppThemeMode.neoBrutalism:
         return compact ? _tableId : 'ACCESS ID: $_tableId';
     }
