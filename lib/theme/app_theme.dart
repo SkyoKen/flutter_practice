@@ -1,11 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
 import 'package:cyber_table_order/theme/theme_tokens.dart';
 
 class AppTheme {
-  static AppThemeMode _activeMode = AppThemeMode.neoBrutalism;
-
   static const AppThemeTokens neonTerminal = AppThemeTokens(
+    mode: AppThemeMode.neonTerminal,
     background: Color(0xFF0B0D10),
     surface: Color(0xFF171A1F),
     surfaceHigh: Color(0xFF22252A),
@@ -22,6 +23,7 @@ class AppTheme {
   );
 
   static const AppThemeTokens neoBrutalism = AppThemeTokens(
+    mode: AppThemeMode.neoBrutalism,
     background: Color(0xFFF2F4F7),
     surface: Color(0xFFFFFFFF),
     surfaceHigh: Color(0xFFE8ECF3),
@@ -38,6 +40,7 @@ class AppTheme {
   );
 
   static const AppThemeTokens paperReceipt = AppThemeTokens(
+    mode: AppThemeMode.paperReceipt,
     background: Color(0xFFF7F0DF),
     surface: Color(0xFFFFFCF2),
     surfaceHigh: Color(0xFFF0E5CC),
@@ -54,6 +57,7 @@ class AppTheme {
   );
 
   static const AppThemeTokens retroOS = AppThemeTokens(
+    mode: AppThemeMode.retroOS,
     background: Color(0xFFC0C0C0),
     surface: Color(0xFFE6E6E6),
     surfaceHigh: Color(0xFFD4D0C8),
@@ -86,31 +90,28 @@ class AppTheme {
     return Theme.of(context).extension<AppThemeTokens>() ?? neoBrutalism;
   }
 
-  static void setActiveMode(AppThemeMode mode) {
-    _activeMode = mode;
+  static AppThemeMode modeOf(BuildContext context) => of(context).mode;
+
+  static double contrastRatio(Color foreground, Color background) {
+    final foregroundLuminance = foreground.computeLuminance();
+    final backgroundLuminance = background.computeLuminance();
+    final lighter = max(foregroundLuminance, backgroundLuminance);
+    final darker = min(foregroundLuminance, backgroundLuminance);
+    return (lighter + 0.05) / (darker + 0.05);
   }
 
-  static AppThemeMode get activeMode => _activeMode;
+  static Color foregroundOn(Color background) {
+    final blackContrast = contrastRatio(Colors.black, background);
+    final whiteContrast = contrastRatio(Colors.white, background);
+    return blackContrast >= whiteContrast ? Colors.black : Colors.white;
+  }
 
-  static AppThemeTokens get activeTokens => tokensFor(_activeMode);
-
-  // Compatibility getters for widgets that still use AppTheme.xxx directly.
-  // New code can prefer AppTheme.of(context), but these stay theme-aware.
-  static Color get background => activeTokens.background;
-  static Color get surface => activeTokens.surface;
-  static Color get surfaceHigh => activeTokens.surfaceHigh;
-  static Color get ink => activeTokens.ink;
-  static Color get border => activeTokens.border;
-  static Color get accent => activeTokens.accent;
-  static Color get accentSoft => activeTokens.accentSoft;
-  static Color get cyan => activeTokens.cyan;
-  static Color get amber => activeTokens.amber;
-  static Color get danger => activeTokens.danger;
-
-  static List<BoxShadow> brutalShadow({
-    Offset offset = const Offset(5, 5),
+  static Color accessibleForeground({
+    required Color preferred,
+    required Color background,
   }) {
-    return activeTokens.hardShadow(offset: offset);
+    if (contrastRatio(preferred, background) >= 4.5) return preferred;
+    return foregroundOn(background);
   }
 
   static ThemeData data(AppThemeMode mode) {
@@ -122,7 +123,9 @@ class AppTheme {
       seedColor: tokens.accent,
       brightness: brightness,
       primary: tokens.accent,
+      onPrimary: foregroundOn(tokens.accent),
       secondary: tokens.cyan,
+      onSecondary: foregroundOn(tokens.cyan),
       tertiary: tokens.amber,
       surface: tokens.surface,
       onSurface: tokens.ink,
@@ -162,7 +165,7 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: tokens.accent,
         contentTextStyle: TextStyle(
-          color: mode == AppThemeMode.neonTerminal ? Colors.black : tokens.ink,
+          color: foregroundOn(tokens.accent),
           fontWeight: FontWeight.bold,
         ),
         behavior: SnackBarBehavior.floating,
@@ -170,8 +173,7 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: tokens.accent,
-          foregroundColor:
-              mode == AppThemeMode.neonTerminal ? Colors.black : tokens.ink,
+          foregroundColor: foregroundOn(tokens.accent),
           elevation: 0,
           side: BorderSide(
             color: tokens.border,
@@ -187,7 +189,10 @@ class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: tokens.accentSoft,
+          foregroundColor: accessibleForeground(
+            preferred: tokens.accentSoft,
+            background: tokens.surface,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(tokens.radius),
           ),

@@ -8,14 +8,12 @@ void main() {
   testWidgets('themed app dialog renders in every theme mode',
       (WidgetTester tester) async {
     for (final mode in AppThemeMode.values) {
-      AppTheme.setActiveMode(mode);
-
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.data(mode),
           home: Scaffold(
             body: ThemedAppDialog(
-              title: mode.label,
+              title: mode.name,
               icon: Icons.info_outline,
               actions: [
                 ThemedDialogButton(
@@ -42,7 +40,7 @@ void main() {
         ),
       );
 
-      expect(find.text(mode.label), findsOneWidget);
+      expect(find.text(mode.name), findsOneWidget);
       expect(find.text('Dialog body'), findsOneWidget);
       expect(find.textContaining('Option'), findsOneWidget);
       expect(find.text('OK'), findsOneWidget);

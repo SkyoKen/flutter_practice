@@ -5,13 +5,13 @@ import 'package:provider/provider.dart';
 import 'package:cyber_table_order/components/customer_arrival_stage.dart';
 import 'package:cyber_table_order/components/game_status_bar.dart';
 import 'package:cyber_table_order/components/kitchen_rush_panel.dart';
-import 'package:cyber_table_order/components/order_history_dialog.dart';
 import 'package:cyber_table_order/components/themed_app_dialog.dart';
 import 'package:cyber_table_order/models/food.dart';
 import 'package:cyber_table_order/models/game_controller.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
+import 'package:cyber_table_order/utils/app_message.dart';
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
@@ -23,6 +23,8 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> {
   Timer? _businessTimer;
   DateTime _lastBusinessTickAt = DateTime.now();
+  bool _businessTickInProgress = false;
+  bool _saveRetryInProgress = false;
   int _recentCompletedOrders = 0;
   int _coinBurstSeed = 0;
 
@@ -42,30 +44,28 @@ class _MenuPageState extends State<MenuPage> {
   }
 
   Future<void> _runBusinessTick() async {
-    if (!mounted) return;
+    if (!mounted || _businessTickInProgress) return;
     final game = context.read<GameController>();
     if (!game.isLoaded) return;
+    _businessTickInProgress = true;
     final restaurant = context.read<Restaurant>();
     final now = DateTime.now();
     final elapsed = now.difference(_lastBusinessTickAt);
     _lastBusinessTickAt = now;
-    final completed = await game.simulateBusinessTick(
-      restaurant.getMenu().map((food) => food.id).toList(),
-      elapsed: elapsed,
-      now: now,
-    );
-    if (!mounted || completed <= 0) return;
-    setState(() {
-      _recentCompletedOrders = completed;
-      _coinBurstSeed += 1;
-    });
-  }
-
-  void _showHistoryLog(BuildContext context, Restaurant restaurant) {
-    showDialog(
-      context: context,
-      builder: (context) => OrderHistoryDialog(restaurant: restaurant),
-    );
+    try {
+      final completed = await game.simulateBusinessTick(
+        restaurant.getMenu().map((food) => food.id).toList(),
+        elapsed: elapsed,
+        now: now,
+      );
+      if (!mounted || completed <= 0) return;
+      setState(() {
+        _recentCompletedOrders = completed;
+        _coinBurstSeed += 1;
+      });
+    } finally {
+      _businessTickInProgress = false;
+    }
   }
 
   void _showKitchenRush(BuildContext context, Restaurant restaurant) {
@@ -104,20 +104,21 @@ class _MenuPageState extends State<MenuPage> {
     await game.claimOfflineEarnings();
     if (!context.mounted) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_pending_income')} +${game.formatCoins(claimed)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_pending_income')} +${game.formatCoins(claimed)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -129,15 +130,100 @@ class _MenuPageState extends State<MenuPage> {
     if (!context.mounted || success) return;
     final restaurant = context.read<Restaurant>();
     final theme = AppTheme.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: theme.danger,
-        content: Text(
-          restaurant.translate('idle_not_enough_coins'),
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        duration: const Duration(seconds: 1),
+    AppMessage.show(
+      context,
+      backgroundColor: theme.danger,
+      content: Text(
+        restaurant.translate('idle_not_enough_coins'),
+        style: const TextStyle(fontWeight: FontWeight.bold),
       ),
+      duration: const Duration(seconds: 1),
+    );
+  }
+
+  Future<void> _retrySave(GameController game) async {
+    if (_saveRetryInProgress) return;
+    setState(() => _saveRetryInProgress = true);
+    try {
+      await game.save();
+    } finally {
+      if (mounted) {
+        setState(() => _saveRetryInProgress = false);
+      }
+    }
+  }
+
+  Widget _buildSaveErrorStrip(Restaurant restaurant) {
+    return Consumer<GameController>(
+      builder: (context, game, child) {
+        if (!game.hasSaveError) return const SizedBox.shrink();
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.modeOf(context);
+        final isTerminal = mode == AppThemeMode.neonTerminal;
+        final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+
+        return Container(
+          key: const ValueKey('save-error-strip'),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          color: mode == AppThemeMode.retroOS
+              ? theme.surfaceHigh
+              : theme.background,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.danger.withValues(alpha: isTerminal ? 0.14 : 0.1),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(
+                color: isTerminal ? theme.cyan : theme.danger,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.sync_problem, color: theme.danger, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    restaurant.translate('idle_save_failed'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: theme.ink,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('save-retry-action'),
+                    onPressed:
+                        _saveRetryInProgress ? null : () => _retrySave(game),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: isTerminal ? theme.cyan : theme.ink,
+                      side: BorderSide(
+                        color: isTerminal ? theme.cyan : theme.danger,
+                        width: mode == AppThemeMode.neoBrutalism ? 2 : 1.5,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(radius),
+                      ),
+                    ),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: Text(
+                      restaurant.translate('idle_retry'),
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -169,7 +255,7 @@ class _MenuPageState extends State<MenuPage> {
                           icon: locked ? Icons.lock : _foodIcon(food),
                           title: locked
                               ? restaurant.translate('idle_locked_dish')
-                              : food.name,
+                              : restaurant.foodName(food),
                           menuLevelLabel: locked
                               ? restaurant.translate('idle_locked')
                               : '${restaurant.translate('idle_menu')} Lv ${game.menuLevel(food.id)}',
@@ -216,16 +302,39 @@ class _MenuPageState extends State<MenuPage> {
     );
   }
 
+  String _businessBottleneckKey(GameBusinessBottleneck bottleneck) {
+    return switch (bottleneck) {
+      GameBusinessBottleneck.seats => 'business_bottleneck_seats',
+      GameBusinessBottleneck.kitchen => 'business_bottleneck_kitchen',
+      GameBusinessBottleneck.dining => 'business_bottleneck_dining',
+      GameBusinessBottleneck.checkout => 'business_bottleneck_checkout',
+      GameBusinessBottleneck.balanced => 'business_bottleneck_balanced',
+    };
+  }
+
+  String _formatRate(double value) {
+    final formatted = value.toStringAsFixed(1);
+    return formatted.endsWith('.0')
+        ? formatted.substring(0, formatted.length - 2)
+        : formatted;
+  }
+
   void _showOperations(BuildContext context, Restaurant restaurant) {
     showDialog(
       context: context,
       builder: (context) {
         return Consumer<GameController>(
           builder: (context, game, child) {
+            final diagnosis = game.businessDiagnosis;
+            final previews = {
+              for (final preview in game.operationUpgradePreviews)
+                preview.type: preview,
+            };
+
             return ThemedAppDialog(
               title: restaurant.translate('rush_operations'),
               icon: Icons.storefront,
-              maxWidth: 560,
+              maxWidth: 620,
               actions: [
                 ThemedDialogButton(
                   label: restaurant.translate('close'),
@@ -236,6 +345,16 @@ class _MenuPageState extends State<MenuPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _BusinessDiagnosisBanner(
+                    diagnosis: diagnosis,
+                    title: restaurant.translate('business_bottleneck_title'),
+                    value: restaurant.translate(
+                      _businessBottleneckKey(diagnosis.bottleneck),
+                    ),
+                    details:
+                        '${restaurant.translate('business_throughput')} ${_formatRate(diagnosis.estimatedOrdersPerMinute)} ${restaurant.translate('business_orders_per_min')} · ${restaurant.translate('business_queue')} ${diagnosis.queueCount} · ${restaurant.translate('business_seat_load')} ${diagnosis.occupiedSeats}/${diagnosis.seatCapacity}',
+                  ),
+                  const SizedBox(height: 10),
                   _ProgressInfoTile(
                     icon: Icons.trending_up,
                     title:
@@ -246,39 +365,31 @@ class _MenuPageState extends State<MenuPage> {
                         '${game.restaurantXpProgress}/${game.restaurantXpProgressTarget}',
                   ),
                   const SizedBox(height: 10),
-                  _UpgradeTile(
+                  _OperationUpgradeTile(
                     icon: Icons.table_restaurant,
-                    title:
-                        '${restaurant.translate('idle_seats')} Lv ${game.seatLevel}',
-                    description:
-                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.seatUpgradeCost)} / ${restaurant.translate('idle_more_customer_flow')}',
-                    trailingLabel:
-                        '+${game.formatCoins(game.revenuePerMinute)}/min',
-                    canAfford: game.coins >= game.seatUpgradeCost,
+                    title: restaurant.translate('idle_seats'),
+                    preview: previews[GameOperationUpgradeType.seats]!,
+                    restaurant: restaurant,
+                    game: game,
                     onTap: () => _attemptUpgrade(context, game.upgradeSeats),
                   ),
                   const SizedBox(height: 10),
-                  _UpgradeTile(
-                    icon: Icons.support_agent,
-                    title:
-                        '${restaurant.translate('idle_service')} Lv ${game.serviceLevel}',
-                    description:
-                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.serviceUpgradeCost)} / ${restaurant.translate('idle_faster_table_turns')}',
-                    trailingLabel: '${game.customerArrivalDelay.inSeconds}s',
-                    canAfford: game.coins >= game.serviceUpgradeCost,
-                    onTap: () => _attemptUpgrade(context, game.upgradeService),
+                  _OperationUpgradeTile(
+                    icon: Icons.kitchen,
+                    title: restaurant.translate('idle_kitchen'),
+                    preview: previews[GameOperationUpgradeType.kitchen]!,
+                    restaurant: restaurant,
+                    game: game,
+                    onTap: () => _attemptUpgrade(context, game.upgradeKitchen),
                   ),
                   const SizedBox(height: 10),
-                  _UpgradeTile(
-                    icon: Icons.kitchen,
-                    title:
-                        '${restaurant.translate('idle_kitchen')} Lv ${game.kitchenLevel}',
-                    description:
-                        '${restaurant.translate('idle_cost')} ${game.formatCoins(game.kitchenUpgradeCost)} / ${restaurant.translate('idle_kitchen_boost')}',
-                    trailingLabel:
-                        '+${game.formatCoins((game.kitchenLevel * 3).toDouble())}',
-                    canAfford: game.coins >= game.kitchenUpgradeCost,
-                    onTap: () => _attemptUpgrade(context, game.upgradeKitchen),
+                  _OperationUpgradeTile(
+                    icon: Icons.support_agent,
+                    title: restaurant.translate('idle_service'),
+                    preview: previews[GameOperationUpgradeType.service]!,
+                    restaurant: restaurant,
+                    game: game,
+                    onTap: () => _attemptUpgrade(context, game.upgradeService),
                   ),
                 ],
               ),
@@ -400,20 +511,21 @@ class _MenuPageState extends State<MenuPage> {
     final reward = await game.claimMilestone(milestone.id);
     if (!context.mounted || reward <= 0) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -426,20 +538,21 @@ class _MenuPageState extends State<MenuPage> {
     final reward = await game.claimDailyTask(task.id);
     if (!context.mounted || reward <= 0) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -455,7 +568,7 @@ class _MenuPageState extends State<MenuPage> {
     if (menu.isEmpty || game.servedCountForFood(menu.first.id) <= 0) {
       return '-';
     }
-    return menu.first.name;
+    return restaurant.foodName(menu.first);
   }
 
   IconData _foodIcon(Food food) {
@@ -471,52 +584,6 @@ class _MenuPageState extends State<MenuPage> {
     return Icons.ramen_dining;
   }
 
-  Widget _buildOfflineClaimStrip(Restaurant restaurant) {
-    return Consumer<GameController>(
-      builder: (context, game, child) {
-        if (game.pendingClaimableEarnings <= 0) {
-          return const SizedBox.shrink();
-        }
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final isTerminal = mode == AppThemeMode.neonTerminal;
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          color: mode == AppThemeMode.retroOS
-              ? theme.surfaceHigh
-              : theme.background,
-          child: SizedBox(
-            height: 42,
-            child: ElevatedButton.icon(
-              onPressed: () => _claimOfflineEarnings(context, restaurant),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isTerminal ? theme.cyan : theme.amber,
-                foregroundColor: isTerminal ? Colors.black : theme.ink,
-                side: BorderSide(
-                  color: isTerminal ? theme.cyan : theme.border,
-                  width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(
-                    mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-                  ),
-                ),
-                elevation: 0,
-              ),
-              icon: const Icon(Icons.savings, size: 18),
-              label: Text(
-                '${restaurant.translate('idle_claim_income')} +${game.formatCoins(game.pendingClaimableEarnings)}',
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildEventStrip(Restaurant restaurant) {
     return Consumer<GameController>(
       builder: (context, game, child) {
@@ -526,7 +593,7 @@ class _MenuPageState extends State<MenuPage> {
           return const SizedBox.shrink();
         }
         final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
+        final mode = AppTheme.modeOf(context);
         final isTerminal = mode == AppThemeMode.neonTerminal;
         final isDiscount =
             game.activeEventType == GameEventType.ingredientDiscount;
@@ -543,9 +610,7 @@ class _MenuPageState extends State<MenuPage> {
             height: 54,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: isTerminal
-                  ? theme.background.withValues(alpha: 0.38)
-                  : theme.amber.withValues(alpha: 0.18),
+              color: isTerminal ? theme.background : theme.amber,
               borderRadius: BorderRadius.circular(
                 mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
               ),
@@ -617,27 +682,28 @@ class _MenuPageState extends State<MenuPage> {
         final milestone = game.nextMilestone;
         if (milestone == null) return const SizedBox.shrink();
         final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
+        final mode = AppTheme.modeOf(context);
         final isTerminal = mode == AppThemeMode.neonTerminal;
         final highlighted = milestone.claimable;
+        final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+        final onTap = highlighted
+            ? () => _claimMilestone(context, game, milestone)
+            : () => _showGoals(context, restaurant);
 
         return Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           color: mode == AppThemeMode.retroOS
               ? theme.surfaceHigh
               : theme.background,
-          child: Container(
+          child: Ink(
             height: 54,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: highlighted && !isTerminal
                   ? theme.accent.withValues(alpha: 0.18)
                   : mode == AppThemeMode.retroOS
                       ? theme.surface
                       : theme.surfaceHigh,
-              borderRadius: BorderRadius.circular(
-                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-              ),
+              borderRadius: BorderRadius.circular(radius),
               border: Border.all(
                 color: highlighted
                     ? theme.accent
@@ -650,59 +716,86 @@ class _MenuPageState extends State<MenuPage> {
                   ? theme.hardShadow(offset: const Offset(3, 3))
                   : null,
             ),
-            child: Row(
-              children: [
-                Icon(
-                  highlighted ? Icons.flag : Icons.outlined_flag,
-                  color: highlighted ? theme.accent : theme.ink,
-                  size: 20,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            child: Semantics(
+              button: true,
+              label:
+                  '${restaurant.translate('rush_next_goal')}: ${restaurant.translate(milestone.titleKey)}',
+              hint: restaurant.translate(
+                highlighted ? 'idle_claim' : 'idle_goals',
+              ),
+              child: InkWell(
+                key: ValueKey('next-goal-action-${milestone.id}'),
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(radius),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
                     children: [
-                      Text(
-                        '${restaurant.translate('rush_next_goal')}: ${restaurant.translate(milestone.titleKey)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: theme.ink,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
+                      Icon(
+                        highlighted ? Icons.flag : Icons.outlined_flag,
+                        color: highlighted ? theme.accent : theme.ink,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${restaurant.translate('rush_next_goal')}: ${restaurant.translate(milestone.titleKey)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: theme.ink,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(radius),
+                              child: LinearProgressIndicator(
+                                minHeight: 6,
+                                value: milestone.progressRatio,
+                                backgroundColor: theme.surface,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(theme.accent),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                      const SizedBox(width: 10),
+                      if (highlighted)
+                        _GoalClaimChip(
+                          label: restaurant.translate('idle_claim'),
+                        )
+                      else
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${milestone.progress}/${milestone.target}',
+                              style: TextStyle(
+                                color: isTerminal ? theme.cyan : theme.ink,
+                                fontWeight: FontWeight.w900,
+                                fontFamily: 'Courier',
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.chevron_right,
+                              color: isTerminal ? theme.cyan : theme.ink,
+                              size: 18,
+                            ),
+                          ],
                         ),
-                        child: LinearProgressIndicator(
-                          minHeight: 6,
-                          value: milestone.progressRatio,
-                          backgroundColor: theme.surface,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(theme.accent),
-                        ),
-                      ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                if (highlighted)
-                  _GoalClaimChip(label: restaurant.translate('idle_claim'))
-                else
-                  Text(
-                    '${milestone.progress}/${milestone.target}',
-                    style: TextStyle(
-                      color: isTerminal ? theme.cyan : theme.ink,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'Courier',
-                      fontSize: 12,
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
         );
@@ -730,15 +823,10 @@ class _MenuPageState extends State<MenuPage> {
             badgeCount: game.claimableRewardCount,
             onTap: (context) => _showGoals(context, restaurant),
           ),
-          _DockAction(
-            icon: Icons.history,
-            label: restaurant.translate('history_log'),
-            onTap: (context) => _showHistoryLog(context, restaurant),
-          ),
         ];
 
         final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
+        final mode = AppTheme.modeOf(context);
         final isTerminal = mode == AppThemeMode.neonTerminal;
         final borderColor = isTerminal ? theme.cyan : theme.border;
 
@@ -785,7 +873,7 @@ class _MenuPageState extends State<MenuPage> {
           showCustomerButton: false,
           showActions: false,
         ),
-        _buildOfflineClaimStrip(restaurant),
+        _buildSaveErrorStrip(restaurant),
         _buildEventStrip(restaurant),
         _buildNextGoalStrip(restaurant),
         Expanded(
@@ -794,6 +882,7 @@ class _MenuPageState extends State<MenuPage> {
               if (wideLandscape) {
                 final stageHeight = bodyConstraints.maxHeight;
                 return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: CustomerArrivalStage(
@@ -812,6 +901,7 @@ class _MenuPageState extends State<MenuPage> {
                       child: _IdleControlPanel(
                         restaurant: restaurant,
                         menu: menu,
+                        sideRail: true,
                         onClaim: () => _claimOfflineEarnings(
                           context,
                           restaurant,
@@ -823,46 +913,45 @@ class _MenuPageState extends State<MenuPage> {
                 );
               }
 
-              final minPanelHeight =
-                  bodyConstraints.maxHeight < 560 ? 220.0 : 252.0;
-              var stageHeight = (bodyConstraints.maxHeight * 0.58)
-                  .clamp(220.0, 420.0)
-                  .toDouble();
-              if (bodyConstraints.maxHeight - stageHeight < minPanelHeight) {
-                stageHeight = (bodyConstraints.maxHeight - minPanelHeight)
-                    .clamp(190.0, 420.0)
-                    .toDouble();
-              }
-              final panelHeight =
-                  (bodyConstraints.maxHeight - stageHeight).clamp(
-                minPanelHeight,
-                bodyConstraints.maxHeight,
-              );
+              const minStageHeight = 190.0;
+              const panelHeight = 176.0;
 
-              return Column(
-                children: [
-                  CustomerArrivalStage(
-                    restaurant: restaurant,
-                    menu: menu,
-                    prominent: true,
-                    height: stageHeight,
-                    recentCompletedOrders: _recentCompletedOrders,
-                    coinBurstSeed: _coinBurstSeed,
-                  ),
-                  SizedBox(
-                    height: panelHeight.toDouble(),
-                    child: _IdleControlPanel(
+              Widget buildStackedDashboard(double stageHeight) {
+                return Column(
+                  children: [
+                    CustomerArrivalStage(
                       restaurant: restaurant,
                       menu: menu,
-                      onClaim: () => _claimOfflineEarnings(
-                        context,
-                        restaurant,
-                      ),
-                      onRush: () => _showKitchenRush(context, restaurant),
+                      prominent: true,
+                      height: stageHeight,
+                      recentCompletedOrders: _recentCompletedOrders,
+                      coinBurstSeed: _coinBurstSeed,
                     ),
-                  ),
-                ],
-              );
+                    SizedBox(
+                      height: panelHeight,
+                      child: _IdleControlPanel(
+                        restaurant: restaurant,
+                        menu: menu,
+                        onClaim: () => _claimOfflineEarnings(
+                          context,
+                          restaurant,
+                        ),
+                        onRush: () => _showKitchenRush(context, restaurant),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              if (bodyConstraints.maxHeight < minStageHeight + panelHeight) {
+                return SingleChildScrollView(
+                  child: buildStackedDashboard(minStageHeight),
+                );
+              }
+
+              final stageHeight = bodyConstraints.maxHeight - panelHeight;
+
+              return buildStackedDashboard(stageHeight);
             },
           ),
         ),
@@ -876,7 +965,7 @@ class _MenuPageState extends State<MenuPage> {
     return Consumer<Restaurant>(
       builder: (context, restaurant, child) {
         return Scaffold(
-          backgroundColor: AppTheme.background,
+          backgroundColor: AppTheme.of(context).background,
           body: LayoutBuilder(
             builder: (context, constraints) {
               return _buildDashboard(restaurant, constraints);
@@ -891,12 +980,14 @@ class _MenuPageState extends State<MenuPage> {
 class _IdleControlPanel extends StatelessWidget {
   final Restaurant restaurant;
   final List<Food> menu;
+  final bool sideRail;
   final VoidCallback onClaim;
   final VoidCallback onRush;
 
   const _IdleControlPanel({
     required this.restaurant,
     required this.menu,
+    this.sideRail = false,
     required this.onClaim,
     required this.onRush,
   });
@@ -906,13 +997,14 @@ class _IdleControlPanel extends StatelessWidget {
     return Consumer<GameController>(
       builder: (context, game, child) {
         final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
+        final mode = AppTheme.modeOf(context);
         final isTerminal = mode == AppThemeMode.neonTerminal;
         final isRetro = mode == AppThemeMode.retroOS;
         final borderColor = isTerminal ? theme.cyan : theme.border;
         final canClaim = game.pendingClaimableEarnings > 0;
 
         return Container(
+          key: const ValueKey('idle-control-panel'),
           decoration: BoxDecoration(
             color: isRetro ? theme.surfaceHigh : theme.surface,
             border: Border(
@@ -928,10 +1020,63 @@ class _IdleControlPanel extends StatelessWidget {
             boxShadow: isTerminal ? theme.softGlow(theme.cyan) : null,
           ),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const metricGap = 8.0;
+              final useMetricGrid = sideRail && constraints.maxHeight >= 286;
+              final metricWidth = useMetricGrid
+                  ? (constraints.maxWidth - metricGap) / 2
+                  : (constraints.maxWidth * 0.44)
+                      .clamp(132.0, 180.0)
+                      .toDouble();
+              final buttonSide = BorderSide(
+                color: borderColor,
+                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+              );
+              final buttonShape = RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(
+                  mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                ),
+              );
+              final metrics = [
+                _AutoMetricChip(
+                  key: const ValueKey('auto-metric-queue'),
+                  width: metricWidth,
+                  icon: Icons.people_alt,
+                  label: restaurant.translate('idle_business_queue'),
+                  value: '${game.businessQueueCount}/${game.businessMaxQueue}',
+                ),
+                _AutoMetricChip(
+                  key: const ValueKey('auto-metric-tables'),
+                  width: metricWidth,
+                  icon: Icons.table_restaurant,
+                  label: restaurant.translate('idle_business_tables'),
+                  value: '${game.businessSeatedCount}/${game.diningCapacity}',
+                ),
+                _AutoMetricChip(
+                  key: const ValueKey('auto-metric-kitchen'),
+                  width: metricWidth,
+                  icon: Icons.kitchen,
+                  label: restaurant.translate('idle_business_kitchen'),
+                  value: '${game.businessKitchenQueueCount}',
+                ),
+                _AutoMetricChip(
+                  key: const ValueKey('auto-metric-dining'),
+                  width: metricWidth,
+                  icon: Icons.local_dining,
+                  label: restaurant.translate('idle_business_eating'),
+                  value: '${game.businessEatingCount}',
+                ),
+                _AutoMetricChip(
+                  key: const ValueKey('auto-metric-checkout'),
+                  width: useMetricGrid ? constraints.maxWidth : metricWidth,
+                  icon: Icons.point_of_sale,
+                  label: restaurant.translate('idle_business_checkout'),
+                  value: '${game.businessCheckoutQueueCount}',
+                ),
+              ];
+
+              final header = Row(
                 children: [
                   Icon(
                     isTerminal ? Icons.terminal : Icons.storefront,
@@ -961,90 +1106,73 @@ class _IdleControlPanel extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compact = constraints.maxWidth < 420;
-                    final itemWidth = compact
-                        ? (constraints.maxWidth - 8) / 2
-                        : (constraints.maxWidth - 24) / 4;
-                    return Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+              );
+              final metricSection = useMetricGrid
+                  ? Column(
+                      key: const ValueKey('idle-metrics-grid'),
                       children: [
-                        _AutoMetricChip(
-                          width: itemWidth,
-                          icon: Icons.people_alt,
-                          label: restaurant.translate('idle_business_queue'),
-                          value:
-                              '${game.businessQueueCount}/${game.businessMaxQueue}',
+                        Row(
+                          children: [
+                            metrics[0],
+                            const SizedBox(width: metricGap),
+                            metrics[1],
+                          ],
                         ),
-                        _AutoMetricChip(
-                          width: itemWidth,
-                          icon: Icons.table_restaurant,
-                          label: restaurant.translate('idle_business_tables'),
-                          value:
-                              '${game.businessSeatedCount}/${game.diningCapacity}',
+                        const SizedBox(height: metricGap),
+                        Row(
+                          children: [
+                            metrics[2],
+                            const SizedBox(width: metricGap),
+                            metrics[3],
+                          ],
                         ),
-                        _AutoMetricChip(
-                          width: itemWidth,
-                          icon: Icons.kitchen,
-                          label: restaurant.translate('idle_business_kitchen'),
-                          value: '${game.businessKitchenQueueCount}',
-                        ),
-                        _AutoMetricChip(
-                          width: itemWidth,
-                          icon: Icons.local_dining,
-                          label: restaurant.translate('idle_business_eating'),
-                          value: '${game.businessEatingCount}',
-                        ),
-                        _AutoMetricChip(
-                          width: itemWidth,
-                          icon: Icons.point_of_sale,
-                          label: restaurant.translate('idle_business_checkout'),
-                          value: '${game.businessCheckoutQueueCount}',
-                        ),
+                        const SizedBox(height: metricGap),
+                        metrics[4],
                       ],
+                    )
+                  : SizedBox(
+                      key: const ValueKey('idle-metrics-scroll'),
+                      height: 58,
+                      child: SingleChildScrollView(
+                        primary: false,
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (var index = 0;
+                                index < metrics.length;
+                                index++) ...[
+                              if (index > 0) const SizedBox(width: metricGap),
+                              metrics[index],
+                            ],
+                          ],
+                        ),
+                      ),
                     );
-                  },
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
+              final actions = Row(
                 children: [
                   Expanded(
+                    flex: 3,
                     child: SizedBox(
-                      height: 42,
+                      height: 48,
                       child: ElevatedButton.icon(
-                        onPressed: canClaim ? onClaim : null,
+                        key: const ValueKey('idle-rush-action'),
+                        onPressed: onRush,
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
                               isTerminal ? theme.cyan : theme.accent,
-                          foregroundColor:
-                              isTerminal ? Colors.black : theme.ink,
-                          disabledBackgroundColor: theme.surfaceHigh,
-                          disabledForegroundColor:
-                              theme.ink.withValues(alpha: 0.45),
-                          side: BorderSide(
-                            color: borderColor,
-                            width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                          foregroundColor: AppTheme.foregroundOn(
+                            isTerminal ? theme.cyan : theme.accent,
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              mode == AppThemeMode.neoBrutalism
-                                  ? theme.radius
-                                  : 0,
-                            ),
-                          ),
+                          side: buttonSide,
+                          shape: buttonShape,
                           elevation: 0,
                         ),
-                        icon: const Icon(Icons.savings, size: 18),
+                        icon: const Icon(
+                          Icons.local_fire_department,
+                          size: 18,
+                        ),
                         label: Text(
-                          canClaim
-                              ? '+${game.formatCoins(game.pendingClaimableEarnings)}'
-                              : restaurant.translate('idle_auto_running'),
+                          restaurant.translate('rush_open_boost'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w900),
@@ -1053,34 +1181,73 @@ class _IdleControlPanel extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  SizedBox(
-                    height: 42,
-                    child: OutlinedButton.icon(
-                      onPressed: onRush,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: isTerminal ? theme.cyan : theme.ink,
-                        side: BorderSide(
-                          color: borderColor,
-                          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            mode == AppThemeMode.neoBrutalism
-                                ? theme.radius
-                                : 0,
+                  Expanded(
+                    flex: 2,
+                    child: SizedBox(
+                      height: 48,
+                      child: Tooltip(
+                        message: canClaim
+                            ? '${restaurant.translate('idle_claim_income')} +${game.formatCoins(game.pendingClaimableEarnings)}'
+                            : restaurant.translate('idle_claim_income'),
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('idle-claim-action'),
+                          onPressed: canClaim ? onClaim : null,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor:
+                                isTerminal ? theme.cyan : theme.ink,
+                            disabledForegroundColor:
+                                theme.ink.withValues(alpha: 0.45),
+                            side: buttonSide,
+                            shape: buttonShape,
+                          ),
+                          icon: const Icon(Icons.savings, size: 18),
+                          label: Text(
+                            canClaim
+                                ? '${restaurant.translate('idle_claim')} +${game.formatCoins(game.pendingClaimableEarnings)}'
+                                : restaurant.translate('idle_claim'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
                           ),
                         ),
-                      ),
-                      icon: const Icon(Icons.local_fire_department, size: 18),
-                      label: Text(
-                        restaurant.translate('rush_open_boost'),
-                        style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                     ),
                   ),
                 ],
-              ),
-            ],
+              );
+              final headerAndMetrics = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  header,
+                  const SizedBox(height: 10),
+                  metricSection,
+                ],
+              );
+
+              if (useMetricGrid) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    headerAndMetrics,
+                    const Spacer(),
+                    actions,
+                  ],
+                );
+              }
+
+              return SingleChildScrollView(
+                primary: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    headerAndMetrics,
+                    const SizedBox(height: 10),
+                    actions,
+                  ],
+                ),
+              );
+            },
           ),
         );
       },
@@ -1095,6 +1262,7 @@ class _AutoMetricChip extends StatelessWidget {
   final String value;
 
   const _AutoMetricChip({
+    super.key,
     required this.width,
     required this.icon,
     required this.label,
@@ -1104,7 +1272,7 @@ class _AutoMetricChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return SizedBox(
@@ -1187,7 +1355,7 @@ class _DockButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
 
@@ -1260,7 +1428,7 @@ class _GoalClaimChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
 
@@ -1277,7 +1445,9 @@ class _GoalClaimChip extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          color: isTerminal ? Colors.black : theme.ink,
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
+          ),
           fontSize: 11,
           fontWeight: FontWeight.w900,
           fontFamily: 'Courier',
@@ -1295,7 +1465,7 @@ class _DockBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final label = count > 9 ? '9+' : count.toString();
 
     return Container(
@@ -1355,7 +1525,7 @@ class _DishBookTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
     final borderWidth = mode == AppThemeMode.neoBrutalism ? 3.0 : 1.5;
@@ -1485,13 +1655,13 @@ class _DishBookTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 SizedBox(
-                  height: 34,
+                  height: 44,
                   child: ElevatedButton(
                     onPressed: canAfford && !locked ? onTap : null,
                     style: ElevatedButton.styleFrom(
                       padding: EdgeInsets.zero,
                       backgroundColor: accent,
-                      foregroundColor: isTerminal ? Colors.black : theme.ink,
+                      foregroundColor: AppTheme.foregroundOn(accent),
                       disabledBackgroundColor: theme.surfaceHigh,
                       disabledForegroundColor:
                           theme.ink.withValues(alpha: 0.42),
@@ -1554,7 +1724,7 @@ class _ProgressInfoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
     final accent = isTerminal ? theme.cyan : theme.accent;
@@ -1635,37 +1805,47 @@ class _ProgressInfoTile extends StatelessWidget {
   }
 }
 
-class _UpgradeTile extends StatelessWidget {
-  final IconData icon;
+class _BusinessDiagnosisBanner extends StatelessWidget {
+  final GameBusinessDiagnosis diagnosis;
   final String title;
-  final String description;
-  final String trailingLabel;
-  final bool canAfford;
-  final VoidCallback onTap;
+  final String value;
+  final String details;
 
-  const _UpgradeTile({
-    required this.icon,
+  const _BusinessDiagnosisBanner({
+    required this.diagnosis,
     required this.title,
-    required this.description,
-    required this.trailingLabel,
-    required this.canAfford,
-    required this.onTap,
+    required this.value,
+    required this.details,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final isBalanced = diagnosis.bottleneck == GameBusinessBottleneck.balanced;
+    final accent = isBalanced
+        ? isTerminal
+            ? theme.cyan
+            : theme.accent
+        : theme.amber;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+    final backgroundColor = isTerminal
+        ? theme.background
+        : Color.alphaBlend(
+            accent.withValues(alpha: 0.16),
+            theme.surface,
+          );
 
     return Container(
+      key: ValueKey('business-diagnosis-${diagnosis.bottleneck.name}'),
+      width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(
-          color: isTerminal ? theme.cyan : theme.border,
+          color: isTerminal ? theme.cyan : accent,
           width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
         ),
         boxShadow: mode == AppThemeMode.neoBrutalism
@@ -1674,7 +1854,11 @@ class _UpgradeTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, color: isTerminal ? theme.cyan : theme.accent, size: 24),
+          Icon(
+            isBalanced ? Icons.check_circle : Icons.warning_amber,
+            color: accent,
+            size: 24,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1682,6 +1866,105 @@ class _UpgradeTile extends StatelessWidget {
               children: [
                 Text(
                   title,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.66),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'Courier',
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: isTerminal ? theme.cyan : theme.ink,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  details,
+                  style: TextStyle(
+                    color: theme.ink.withValues(alpha: 0.68),
+                    fontFamily: 'Courier',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OperationUpgradeTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final GameOperationUpgradePreview preview;
+  final Restaurant restaurant;
+  final GameController game;
+  final VoidCallback onTap;
+
+  const _OperationUpgradeTile({
+    required this.icon,
+    required this.title,
+    required this.preview,
+    required this.restaurant,
+    required this.game,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.modeOf(context);
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
+    final accent = preview.isRecommended
+        ? isTerminal
+            ? theme.cyan
+            : theme.accent
+        : isTerminal
+            ? theme.cyan
+            : theme.border;
+    final currentLabel = restaurant.translate('upgrade_preview_current');
+    final projectedLabel = restaurant.translate('upgrade_preview_projected');
+    final gainLabel = restaurant.translate('upgrade_preview_gain');
+    final rateLabel = restaurant.translate('idle_coins_per_min');
+    final costLabel = restaurant.translate('idle_cost');
+
+    return Container(
+      key: ValueKey('operation-preview-${preview.type.name}'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: accent,
+          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+        ),
+        boxShadow: preview.isRecommended && mode == AppThemeMode.neoBrutalism
+            ? theme.hardShadow(offset: const Offset(3, 3))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                icon,
+                color: isTerminal ? theme.cyan : theme.accent,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '$title Lv ${preview.currentLevel} → ${preview.upgradedLevel}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1689,61 +1972,138 @@ class _UpgradeTile extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: theme.ink.withValues(alpha: 0.64),
-                    fontSize: 12,
-                    height: 1.25,
-                  ),
+              ),
+              if (preview.isRecommended) ...[
+                const SizedBox(width: 8),
+                _OperationPreviewChip(
+                  label: restaurant.translate('upgrade_recommended'),
+                  emphasized: true,
                 ),
               ],
-            ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 6,
+            runSpacing: 5,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
-                trailingLabel,
+                '$currentLabel ${game.formatCoins(preview.currentCoinsPerMinute)}',
                 style: TextStyle(
-                  color: theme.ink,
-                  fontWeight: FontWeight.w900,
+                  color: theme.ink.withValues(alpha: 0.68),
                   fontFamily: 'Courier',
-                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
                 ),
               ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: 42,
-                height: 34,
-                child: ElevatedButton(
-                  onPressed: canAfford ? onTap : null,
-                  style: ElevatedButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    backgroundColor: isTerminal ? theme.cyan : theme.accent,
-                    foregroundColor: isTerminal ? Colors.black : theme.ink,
-                    disabledBackgroundColor: theme.surfaceHigh,
-                    disabledForegroundColor: theme.ink.withValues(alpha: 0.42),
-                    side: BorderSide(
-                      color: isTerminal ? theme.cyan : theme.border,
-                      width: 1.5,
+              Icon(
+                Icons.arrow_forward,
+                size: 14,
+                color: isTerminal ? theme.cyan : theme.accent,
+              ),
+              Text(
+                '$projectedLabel ${game.formatCoins(preview.upgradedCoinsPerMinute)} $rateLabel',
+                style: TextStyle(
+                  color: theme.ink,
+                  fontFamily: 'Courier',
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 7,
+                  runSpacing: 5,
+                  children: [
+                    _OperationPreviewChip(
+                      label:
+                          '$gainLabel +${game.formatCoins(preview.coinsPerMinuteGain)} $rateLabel',
+                      emphasized: preview.isRecommended,
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(radius),
+                    _OperationPreviewChip(
+                      label: '$costLabel ${game.formatCoins(preview.cost)}',
                     ),
-                    elevation: 0,
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Tooltip(
+                message: '$title Lv ${preview.upgradedLevel}',
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: ElevatedButton(
+                    key: ValueKey('operation-upgrade-${preview.type.name}'),
+                    onPressed: preview.canAfford ? onTap : null,
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+                      foregroundColor: AppTheme.foregroundOn(
+                        isTerminal ? theme.cyan : theme.accent,
+                      ),
+                      disabledBackgroundColor: theme.surfaceHigh,
+                      disabledForegroundColor:
+                          theme.ink.withValues(alpha: 0.42),
+                      side: BorderSide(color: accent, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(radius),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Icon(Icons.upgrade, size: 18),
                   ),
-                  child: const Icon(Icons.upgrade, size: 18),
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _OperationPreviewChip extends StatelessWidget {
+  final String label;
+  final bool emphasized;
+
+  const _OperationPreviewChip({
+    required this.label,
+    this.emphasized = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.modeOf(context);
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final accent = isTerminal ? theme.cyan : theme.accent;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: emphasized ? accent.withValues(alpha: 0.18) : theme.surfaceHigh,
+        borderRadius: BorderRadius.circular(
+          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+        ),
+        border: Border.all(
+          color: emphasized ? accent : theme.border.withValues(alpha: 0.7),
+          width: emphasized && mode == AppThemeMode.neoBrutalism ? 2 : 1,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: theme.ink,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+          fontFamily: 'Courier',
+        ),
       ),
     );
   }
@@ -1757,7 +2117,7 @@ class _DialogSectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
 
     return Align(
       alignment: Alignment.centerLeft,
@@ -1822,7 +2182,7 @@ class _StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
 
@@ -1888,7 +2248,7 @@ class _GoalTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
 
@@ -1953,13 +2313,15 @@ class _GoalTile extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 84,
-            height: 38,
+            height: 44,
             child: ElevatedButton(
               onPressed: onClaim,
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 backgroundColor: isTerminal ? theme.cyan : theme.accent,
-                foregroundColor: isTerminal ? Colors.black : theme.ink,
+                foregroundColor: AppTheme.foregroundOn(
+                  isTerminal ? theme.cyan : theme.accent,
+                ),
                 disabledBackgroundColor: theme.surfaceHigh,
                 disabledForegroundColor: theme.ink.withValues(alpha: 0.5),
                 side: BorderSide(
@@ -2002,7 +2364,7 @@ class _DailyTaskTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final radius = mode == AppThemeMode.neoBrutalism ? theme.radius : 0.0;
 
@@ -2083,13 +2445,15 @@ class _DailyTaskTile extends StatelessWidget {
           const SizedBox(width: 10),
           SizedBox(
             width: 84,
-            height: 38,
+            height: 44,
             child: ElevatedButton(
               onPressed: onClaim,
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 backgroundColor: isTerminal ? theme.cyan : theme.accent,
-                foregroundColor: isTerminal ? Colors.black : theme.ink,
+                foregroundColor: AppTheme.foregroundOn(
+                  isTerminal ? theme.cyan : theme.accent,
+                ),
                 disabledBackgroundColor: theme.surfaceHigh,
                 disabledForegroundColor: theme.ink.withValues(alpha: 0.5),
                 side: BorderSide(

@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cyber_table_order/models/game_controller.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<DateTime> _advanceManualToTicket(
   GameController game,
@@ -35,8 +38,92 @@ Future<DateTime> _advanceManualUntilDone(
   return cursor;
 }
 
+class _RecordingGameStorage extends MemoryGameStorage {
+  int activeSnapshotWrites = 0;
+  int maxConcurrentSnapshotWrites = 0;
+  int snapshotWriteCount = 0;
+
+  @override
+  Future<void> setString(String key, String value) async {
+    if (key != 'idle_game_snapshot_v2') {
+      await super.setString(key, value);
+      return;
+    }
+    snapshotWriteCount += 1;
+    activeSnapshotWrites += 1;
+    maxConcurrentSnapshotWrites =
+        maxConcurrentSnapshotWrites < activeSnapshotWrites
+            ? activeSnapshotWrites
+            : maxConcurrentSnapshotWrites;
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await super.setString(key, value);
+    } finally {
+      activeSnapshotWrites -= 1;
+    }
+  }
+}
+
+class _FailingGameStorage extends MemoryGameStorage {
+  bool failNextSnapshotWrite = false;
+
+  @override
+  Future<void> setString(String key, String value) async {
+    if (key == 'idle_game_snapshot_v2' && failNextSnapshotWrite) {
+      failNextSnapshotWrite = false;
+      throw StateError('simulated write failure');
+    }
+    await super.setString(key, value);
+  }
+}
+
+Map<String, Object?> _storedAutoCustomer({
+  required int id,
+  required GameDiningCustomerPhase phase,
+  int? seatIndex,
+}) {
+  return {
+    'id': id,
+    'source': GameDiningCustomerSource.auto.name,
+    'phase': phase.name,
+    'seatIndex': seatIndex,
+    'foodId': 1,
+    'reward': 25.0,
+    'customerType': GameCustomerType.normal.name,
+    'phaseStartedAt': '2026-01-01T12:00:00.000',
+  };
+}
+
+Future<GameController> _gameWithBusinessState(
+  List<Map<String, Object?>> customers,
+) async {
+  final game = GameController(
+    storage: MemoryGameStorage({
+      'idle_dining_customers': jsonEncode(customers),
+    }),
+  );
+  await game.load(now: DateTime(2026, 1, 1, 12));
+  return game;
+}
+
 void main() {
   group('GameController', () {
+    test('shared preferences storage clears only idle game keys', () async {
+      SharedPreferences.setMockInitialValues({
+        'idle_game_snapshot_v2': '{}',
+        'idle_legacy_value': 4,
+        'theme_mode': 'retroOS',
+      });
+      final storage = SharedPreferencesGameStorage();
+
+      await storage.clearGameData();
+
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.containsKey('idle_game_snapshot_v2'), isFalse);
+      expect(preferences.containsKey('idle_legacy_value'), isFalse);
+      expect(preferences.getString('theme_mode'), 'retroOS');
+    });
+
     test('starts with default idle restaurant values', () async {
       final game = GameController(storage: MemoryGameStorage());
       final now = DateTime(2026, 1, 1, 12);
@@ -61,6 +148,184 @@ void main() {
       expect(game.businessEatingCount, 0);
       expect(game.hasBusinessActivity, isFalse);
       expect(game.pendingOfflineEarnings, 0);
+    });
+
+    test('formats large coin values without redundant decimals', () async {
+      final game = GameController(storage: MemoryGameStorage());
+      await game.load(now: DateTime(2026, 1, 1, 12));
+
+      expect(game.formatCoins(999), '999');
+      expect(game.formatCoins(1000), '1K');
+      expect(game.formatCoins(12345), '12.3K');
+      expect(game.formatCoins(1200000), '1.2M');
+      expect(game.formatCoins(999999), '1M');
+      expect(game.formatCompactCoins(1000000), '1M');
+    });
+
+    test('uses catalog unlock levels and per-dish base rewards', () async {
+      final game = GameController(storage: MemoryGameStorage());
+      await game.load(now: DateTime(2026, 1, 1, 12));
+
+      expect(game.foodUnlockLevel(6), 2);
+      expect(game.foodUnlockLevel(9), 5);
+      expect(game.foodUnlockLevel(999), 99);
+      expect(
+        game.customerOrderRewardForFood(2) - game.customerOrderRewardForFood(1),
+        4,
+      );
+      expect(
+        game.customerOrderRewardForFood(999),
+        game.customerOrderRewardForFood(1),
+      );
+    });
+
+    test('diagnoses live business bottlenecks from rates and stage pressure',
+        () async {
+      final balanced = await _gameWithBusinessState(const []);
+      final kitchen = await _gameWithBusinessState([
+        _storedAutoCustomer(
+          id: 1,
+          phase: GameDiningCustomerPhase.waitingForFood,
+          seatIndex: 0,
+        ),
+      ]);
+      final dining = await _gameWithBusinessState([
+        _storedAutoCustomer(
+          id: 1,
+          phase: GameDiningCustomerPhase.eating,
+          seatIndex: 0,
+        ),
+      ]);
+      final checkout = await _gameWithBusinessState([
+        _storedAutoCustomer(
+          id: 1,
+          phase: GameDiningCustomerPhase.checkout,
+          seatIndex: 0,
+        ),
+      ]);
+      final seats = await _gameWithBusinessState([
+        _storedAutoCustomer(
+          id: 1,
+          phase: GameDiningCustomerPhase.eating,
+          seatIndex: 0,
+        ),
+        _storedAutoCustomer(
+          id: 2,
+          phase: GameDiningCustomerPhase.eating,
+          seatIndex: 1,
+        ),
+        _storedAutoCustomer(
+          id: 3,
+          phase: GameDiningCustomerPhase.queueing,
+        ),
+      ]);
+
+      expect(balanced.businessBottleneck, GameBusinessBottleneck.balanced);
+      expect(kitchen.businessBottleneck, GameBusinessBottleneck.kitchen);
+      expect(dining.businessBottleneck, GameBusinessBottleneck.dining);
+      expect(checkout.businessBottleneck, GameBusinessBottleneck.checkout);
+      expect(seats.businessBottleneck, GameBusinessBottleneck.seats);
+
+      final diagnosis = seats.businessDiagnosis;
+      expect(diagnosis.queueCount, 1);
+      expect(diagnosis.occupiedSeats, 2);
+      expect(diagnosis.seatCapacity, 2);
+      expect(diagnosis.seatUtilization, 1);
+      expect(
+        diagnosis.arrivalRatePerMinute,
+        closeTo(seats.customerArrivalRatePerMinute, 0.001),
+      );
+      expect(
+        diagnosis.estimatedOrdersPerMinute,
+        closeTo(seats.autoOrdersPerMinute, 0.001),
+      );
+      expect(
+        kitchen.recommendedOperationUpgradeType,
+        GameOperationUpgradeType.kitchen,
+      );
+      expect(
+        checkout.recommendedOperationUpgradeType,
+        GameOperationUpgradeType.service,
+      );
+      expect(
+        seats.recommendedOperationUpgradeType,
+        GameOperationUpgradeType.seats,
+      );
+    });
+
+    test('operation upgrade previews are complete and side effect free',
+        () async {
+      final game = GameController(storage: MemoryGameStorage());
+      final now = DateTime(2026, 1, 1, 12);
+      await game.load(now: now);
+      final coinsBefore = game.coins;
+      final levelsBefore = [
+        game.seatLevel,
+        game.kitchenLevel,
+        game.serviceLevel,
+      ];
+      final unlockedBefore = game.unlockedFoodIds;
+      final savedAtBefore = game.lastSavedAt;
+
+      final previews = game.operationUpgradePreviews;
+      final seats = game.previewOperationUpgrade(
+        GameOperationUpgradeType.seats,
+      );
+      final kitchen = game.previewOperationUpgrade(
+        GameOperationUpgradeType.kitchen,
+      );
+      final service = game.previewOperationUpgrade(
+        GameOperationUpgradeType.service,
+      );
+
+      expect(
+        previews.map((preview) => preview.type),
+        containsAll(GameOperationUpgradeType.values),
+      );
+      expect(previews, hasLength(3));
+      for (final preview in previews) {
+        expect(
+          preview.currentOrdersPerMinute,
+          closeTo(game.autoOrdersPerMinute, 0.001),
+        );
+        expect(preview.upgradedLevel, preview.currentLevel + 1);
+        expect(preview.coinsPerMinuteGain, greaterThan(0));
+        expect(
+          preview.upgradedCoinsPerMinute,
+          closeTo(
+            preview.currentCoinsPerMinute + preview.coinsPerMinuteGain,
+            0.001,
+          ),
+        );
+        expect(preview.cost, greaterThan(0));
+        expect(preview.canAfford, isTrue);
+        expect(preview.paybackMinutes, greaterThan(0));
+      }
+      expect(seats.cost, game.seatUpgradeCost);
+      expect(kitchen.cost, game.kitchenUpgradeCost);
+      expect(service.cost, game.serviceUpgradeCost);
+      expect(
+        seats.upgradedOrdersPerMinute,
+        greaterThan(seats.currentOrdersPerMinute),
+      );
+      expect(
+        kitchen.upgradedOrdersPerMinute,
+        closeTo(kitchen.currentOrdersPerMinute, 0.001),
+      );
+      expect(
+        service.upgradedOrdersPerMinute,
+        greaterThan(service.currentOrdersPerMinute),
+      );
+      expect(service.isRecommended, isTrue);
+      expect(previews.where((preview) => preview.isRecommended), hasLength(1));
+
+      expect(game.coins, coinsBefore);
+      expect(
+        [game.seatLevel, game.kitchenLevel, game.serviceLevel],
+        levelsBefore,
+      );
+      expect(game.unlockedFoodIds, unlockedBefore);
+      expect(game.lastSavedAt, savedAtBefore);
     });
 
     test('business display ratios reflect loaded automatic dining state',
@@ -172,8 +437,8 @@ void main() {
 
       final completed = await game.simulateBusinessTick(
         [1, 2, 3],
-        elapsed: const Duration(minutes: 3),
-        now: start.add(const Duration(minutes: 3)),
+        elapsed: const Duration(minutes: 2),
+        now: start.add(const Duration(minutes: 2)),
       );
 
       expect(completed, greaterThan(0));
@@ -184,12 +449,33 @@ void main() {
 
       final pending = game.pendingBusinessEarnings;
       await game.claimOfflineEarnings(
-        now: start.add(const Duration(minutes: 4)),
+        now: start.add(const Duration(minutes: 3)),
       );
 
       expect(game.pendingBusinessEarnings, 0);
       expect(game.coins, GameController.startingCoins + pending);
       expect(game.lifetimeEarnings, pending);
+    });
+
+    test('delayed business ticks convert unsimulated time into idle income',
+        () async {
+      final game = GameController(storage: MemoryGameStorage());
+      final start = DateTime(2026, 1, 1, 12);
+      await game.load(now: start);
+      final passiveRate = game.revenuePerMinute;
+
+      await game.simulateBusinessTick(
+        [1, 2, 3],
+        elapsed: const Duration(minutes: 10),
+        now: start.add(const Duration(minutes: 10)),
+      );
+
+      expect(
+        game.pendingOfflineEarnings,
+        closeTo(passiveRate * 8, 0.001),
+      );
+      expect(game.pendingBusinessEarnings, greaterThan(0));
+      expect(game.lastSavedAt, start.add(const Duration(minutes: 10)));
     });
 
     test('automatic business creates real visible activity quickly', () async {
@@ -274,76 +560,6 @@ void main() {
       expect(game.pendingBusinessEarnings, greaterThan(0));
     });
 
-    test('orders add a small reward once per cooldown', () async {
-      final game = GameController(storage: MemoryGameStorage());
-      final start = DateTime(2026, 1, 1, 12);
-      await game.load(now: start);
-
-      final firstReward = await game.rewardOrder('100.00', now: start);
-      expect(firstReward, GameController.manualOrderRewardCoins);
-      expect(
-        game.coins,
-        GameController.startingCoins + GameController.manualOrderRewardCoins,
-      );
-      expect(game.lifetimeEarnings, GameController.manualOrderRewardCoins);
-
-      final cooldownReward = await game.rewardOrder(
-        '100.00',
-        now: start.add(const Duration(seconds: 10)),
-      );
-      expect(cooldownReward, 0);
-      expect(
-        game.coins,
-        GameController.startingCoins + GameController.manualOrderRewardCoins,
-      );
-      expect(
-        game.orderRewardCooldownRemaining(
-          start.add(const Duration(seconds: 10)),
-        ),
-        const Duration(seconds: 20),
-      );
-
-      final nextReward = await game.rewardOrder(
-        '100.00',
-        now: start.add(GameController.manualOrderRewardCooldown),
-      );
-      expect(nextReward, GameController.manualOrderRewardCoins);
-      expect(
-        game.coins,
-        GameController.startingCoins +
-            GameController.manualOrderRewardCoins * 2,
-      );
-      expect(
-        game.lifetimeEarnings,
-        GameController.manualOrderRewardCoins * 2,
-      );
-    });
-
-    test('order reward cooldown survives reloads', () async {
-      final storage = MemoryGameStorage();
-      final start = DateTime(2026, 1, 1, 12);
-      final firstSession = GameController(storage: storage);
-      await firstSession.load(now: start);
-      await firstSession.rewardOrder('100.00', now: start);
-
-      final resumed = GameController(storage: storage);
-      await resumed.load(now: start.add(const Duration(seconds: 15)));
-
-      expect(
-        resumed.orderRewardCooldownRemaining(
-          start.add(const Duration(seconds: 15)),
-        ),
-        const Duration(seconds: 15),
-      );
-      expect(
-        await resumed.rewardOrder(
-          '100.00',
-          now: start.add(const Duration(seconds: 15)),
-        ),
-        0,
-      );
-    });
-
     test('customer orders can be generated and served', () async {
       final game = GameController(storage: MemoryGameStorage());
       final start = DateTime(2026, 1, 1, 12);
@@ -363,6 +579,7 @@ void main() {
 
       final servedReward = await game.serveCustomerOrder(
         [3, 1, 2],
+        selectedFoodId: 1,
         now: now,
       );
 
@@ -391,6 +608,30 @@ void main() {
       expect(game.customerOrderFoodId, 2);
     });
 
+    test('model rejects a selected dish that does not match the request',
+        () async {
+      final game = GameController(storage: MemoryGameStorage());
+      final start = DateTime(2026, 1, 1, 12);
+      await game.load(now: start);
+      await game.ensureCustomerOrder([1], now: start);
+      final ticketAt = await _advanceManualToTicket(game, start);
+      final coinsBefore = game.coins;
+
+      final reward = await game.serveCustomerOrder(
+        [1],
+        selectedFoodId: 2,
+        now: ticketAt,
+      );
+
+      expect(reward, 0);
+      expect(game.coins, coinsBefore);
+      expect(game.customerOrderFoodId, 1);
+      expect(
+        game.manualDiningCustomer?.phase,
+        GameDiningCustomerPhase.waitingForFood,
+      );
+    });
+
     test('customer service can pay a combo multiplier bonus', () async {
       final game = GameController(storage: MemoryGameStorage());
       final start = DateTime(2026, 1, 1, 12);
@@ -401,6 +642,7 @@ void main() {
 
       final servedReward = await game.serveCustomerOrder(
         [1],
+        selectedFoodId: 1,
         now: now,
         rewardMultiplier: 1.5,
       );
@@ -422,6 +664,7 @@ void main() {
 
       await game.serveCustomerOrder(
         [1],
+        selectedFoodId: 1,
         now: now,
         combo: 3,
       );
@@ -438,6 +681,7 @@ void main() {
       now = await _advanceManualToTicket(game, nextOrderAt);
       await game.serveCustomerOrder(
         [1],
+        selectedFoodId: 1,
         now: now,
         combo: 2,
       );
@@ -471,6 +715,7 @@ void main() {
         expect(game.customerOrderFoodId, 1);
         await game.serveCustomerOrder(
           [1],
+          selectedFoodId: 1,
           now: now,
         );
         now = await _advanceManualUntilDone(game, now);
@@ -512,6 +757,7 @@ void main() {
       expect(
         await game.serveCustomerOrder(
           [1],
+          selectedFoodId: 1,
           now: expiredAt,
           rewardMultiplier: 2,
         ),
@@ -548,6 +794,7 @@ void main() {
       var now = await _advanceManualToTicket(firstSession, start);
       await firstSession.serveCustomerOrder(
         [1, 2],
+        selectedFoodId: 1,
         now: now,
       );
       now = await _advanceManualUntilDone(firstSession, now);
@@ -582,6 +829,7 @@ void main() {
       var now = await _advanceManualToTicket(game, start);
       final customerReward = await game.serveCustomerOrder(
         [1],
+        selectedFoodId: 1,
         now: now,
       );
       now = await _advanceManualUntilDone(game, now);
@@ -614,6 +862,7 @@ void main() {
       var now = await _advanceManualToTicket(firstSession, start);
       await firstSession.serveCustomerOrder(
         [1],
+        selectedFoodId: 1,
         now: now,
       );
       now = await _advanceManualUntilDone(firstSession, now);
@@ -643,6 +892,7 @@ void main() {
         now = await _advanceManualToTicket(game, now);
         earned += await game.serveCustomerOrder(
           [1],
+          selectedFoodId: 1,
           now: now,
           combo: combo,
         );
@@ -729,6 +979,7 @@ void main() {
         now = await _advanceManualToTicket(game, now);
         await game.serveCustomerOrder(
           [1],
+          selectedFoodId: 1,
           now: now,
         );
         now = await _advanceManualUntilDone(game, now);
@@ -762,6 +1013,7 @@ void main() {
         now = await _advanceManualToTicket(game, now);
         await game.serveCustomerOrder(
           [1],
+          selectedFoodId: 1,
           now: now,
           combo: i + 1,
         );
@@ -785,6 +1037,82 @@ void main() {
 
       expect(resumedNextDay.dailyOrdersServed, 0);
       expect(resumedNextDay.claimedDailyTaskIds, isEmpty);
+    });
+
+    test('migrates legacy keys into one versioned atomic snapshot', () async {
+      final storage = MemoryGameStorage({
+        'idle_coins': 250.0,
+        'idle_seat_level': 3,
+      });
+      final game = GameController(storage: storage);
+
+      await game.load(now: DateTime(2026, 1, 1, 12));
+
+      expect(game.coins, 250);
+      expect(game.seatLevel, 3);
+      expect(storage.values['idle_game_snapshot_v2'], isA<String>());
+
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: DateTime(2026, 1, 1, 12));
+      expect(resumed.coins, 250);
+      expect(resumed.seatLevel, 3);
+    });
+
+    test('serializes overlapping snapshot writes in invocation order',
+        () async {
+      final storage = _RecordingGameStorage();
+      final game = GameController(storage: storage);
+      final start = DateTime(2026, 1, 1, 12);
+      await game.load(now: start);
+      storage.snapshotWriteCount = 0;
+      storage.maxConcurrentSnapshotWrites = 0;
+
+      final first = game.save(now: start.add(const Duration(minutes: 1)));
+      final second = game.save(now: start.add(const Duration(minutes: 2)));
+      await Future.wait([first, second]);
+
+      expect(storage.snapshotWriteCount, 2);
+      expect(storage.maxConcurrentSnapshotWrites, 1);
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: start.add(const Duration(minutes: 2)));
+      expect(
+        resumed.lastSavedAt,
+        start.add(const Duration(minutes: 2)),
+      );
+    });
+
+    test('keeps unclaimed offline earnings across a later snapshot save',
+        () async {
+      final storage = MemoryGameStorage();
+      final start = DateTime(2026, 1, 1, 12);
+      final first = GameController(storage: storage);
+      await first.load(now: start);
+      await first.save(now: start);
+
+      final returned = GameController(storage: storage);
+      final returnTime = start.add(const Duration(minutes: 30));
+      await returned.load(now: returnTime);
+      final pending = returned.pendingOfflineEarnings;
+      expect(pending, greaterThan(0));
+
+      await returned.save(now: returnTime);
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: returnTime);
+
+      expect(resumed.pendingOfflineEarnings, closeTo(pending, 0.001));
+    });
+
+    test('surfaces a failed snapshot write and recovers on retry', () async {
+      final storage = _FailingGameStorage();
+      final game = GameController(storage: storage);
+      await game.load(now: DateTime(2026, 1, 1, 12));
+
+      storage.failNextSnapshotWrite = true;
+      await game.save();
+      expect(game.hasSaveError, isTrue);
+
+      await game.save();
+      expect(game.hasSaveError, isFalse);
     });
   });
 }

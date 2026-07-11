@@ -6,6 +6,7 @@ import 'package:cyber_table_order/models/game_controller.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
+import 'package:cyber_table_order/utils/app_message.dart';
 
 class GameStatusBar extends StatelessWidget {
   final Restaurant restaurant;
@@ -26,7 +27,7 @@ class GameStatusBar extends StatelessWidget {
     return Consumer<GameController>(
       builder: (context, game, child) {
         final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
+        final mode = AppTheme.modeOf(context);
         final isTerminal = mode == AppThemeMode.neonTerminal;
         final isRetro = mode == AppThemeMode.retroOS;
         final borderColor = isTerminal ? theme.cyan : theme.border;
@@ -55,7 +56,7 @@ class GameStatusBar extends StatelessWidget {
                 ),
                 _StatPill(
                   icon: Icons.trending_up,
-                  label: restaurant.translate('idle_yen_per_min'),
+                  label: restaurant.translate('idle_coins_per_min'),
                   value: game.formatCoins(game.revenuePerMinute),
                   compact: compact,
                 ),
@@ -192,7 +193,7 @@ class GameStatusBar extends StatelessWidget {
     required Color borderColor,
   }) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final manualCustomer = game.manualDiningCustomer;
     final activeFood =
@@ -207,7 +208,7 @@ class GameStatusBar extends StatelessWidget {
         arrivalRemaining > Duration.zero;
     final buttonWidth = compact ? maxWidth : 340.0;
     final label = hasOrder
-        ? '${restaurant.translate('idle_customer_order')}: ${activeFood.name} +${game.formatCoins(game.customerOrderReward)}'
+        ? '${restaurant.translate('idle_customer_order')}: ${restaurant.foodName(activeFood)} +${game.formatCoins(game.customerOrderReward)}'
         : busyWithManualCustomer
             ? _manualCustomerStatusLabel(manualCustomer)
             : waitingForCustomer
@@ -264,12 +265,14 @@ class GameStatusBar extends StatelessWidget {
 
     return SizedBox(
       width: buttonWidth,
-      height: 36,
+      height: 44,
       child: ElevatedButton.icon(
         onPressed: () => _serveCustomerOrder(context, game),
         style: ElevatedButton.styleFrom(
           backgroundColor: isTerminal ? theme.cyan : theme.accent,
-          foregroundColor: isTerminal ? Colors.black : theme.ink,
+          foregroundColor: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
+          ),
           side: side,
           shape: shape,
           elevation: 0,
@@ -288,24 +291,23 @@ class GameStatusBar extends StatelessWidget {
     if (!context.mounted) return;
     if (seated) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
     final remaining = game.customerArrivalRemaining(DateTime.now());
     final message = remaining > Duration.zero
         ? '${restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}'
         : restaurant.translate('rush_waiting_table');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: theme.surfaceHigh,
-        content: Text(
-          message,
-          style: TextStyle(
-            color: isTerminal ? theme.cyan : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
-          ),
+    AppMessage.show(
+      context,
+      backgroundColor: theme.surfaceHigh,
+      content: Text(
+        message,
+        style: TextStyle(
+          color: isTerminal ? theme.cyan : theme.ink,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -353,23 +355,29 @@ class GameStatusBar extends StatelessWidget {
     BuildContext context,
     GameController game,
   ) async {
-    final reward = await game.serveCustomerOrder(_menuIds);
+    final selectedFoodId = game.customerOrderFoodId;
+    if (selectedFoodId == null) return;
+    final reward = await game.serveCustomerOrder(
+      _menuIds,
+      selectedFoodId: selectedFoodId,
+    );
     if (!context.mounted || reward <= 0) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_served_reward')} +${game.formatCoins(reward)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_served_reward')} +${game.formatCoins(reward)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -379,7 +387,7 @@ class GameStatusBar extends StatelessWidget {
     required Color borderColor,
   }) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final claimableCount = game.claimableMilestoneCount;
     final label = claimableCount > 0
@@ -387,7 +395,7 @@ class GameStatusBar extends StatelessWidget {
         : restaurant.translate('idle_goals');
 
     return SizedBox(
-      height: 36,
+      height: 44,
       child: OutlinedButton.icon(
         onPressed: () => _showGoalsDialog(context),
         style: OutlinedButton.styleFrom(
@@ -420,11 +428,11 @@ class GameStatusBar extends StatelessWidget {
     required Color borderColor,
   }) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return SizedBox(
-      height: 36,
+      height: 44,
       child: ElevatedButton.icon(
         onPressed: game.pendingClaimableEarnings <= 0
             ? null
@@ -435,7 +443,9 @@ class GameStatusBar extends StatelessWidget {
               : isTerminal
                   ? theme.cyan
                   : theme.accent,
-          foregroundColor: isTerminal ? Colors.black : theme.ink,
+          foregroundColor: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
+          ),
           disabledBackgroundColor: theme.surfaceHigh,
           disabledForegroundColor: theme.ink.withValues(alpha: 0.45),
           side: BorderSide(
@@ -468,11 +478,11 @@ class GameStatusBar extends StatelessWidget {
     required Color borderColor,
   }) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return SizedBox(
-      height: 36,
+      height: 44,
       child: OutlinedButton.icon(
         onPressed: () => _showUpgradeDialog(context),
         style: OutlinedButton.styleFrom(
@@ -547,20 +557,21 @@ class GameStatusBar extends StatelessWidget {
     final reward = await game.claimMilestone(milestone.id);
     if (!context.mounted || reward <= 0) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_goal_claimed')} +${game.formatCoins(reward)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -572,20 +583,21 @@ class GameStatusBar extends StatelessWidget {
     await game.claimOfflineEarnings();
     if (!context.mounted) return;
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${restaurant.translate('idle_pending_income')} +${game.formatCoins(claimed)}',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    AppMessage.show(
+      context,
+      backgroundColor: isTerminal ? theme.cyan : theme.accent,
+      content: Text(
+        '${restaurant.translate('idle_pending_income')} +${game.formatCoins(claimed)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(
+            isTerminal ? theme.cyan : theme.accent,
           ),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -647,7 +659,8 @@ class GameStatusBar extends StatelessWidget {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _UpgradeOption(
-                        label: '${food.name} Lv ${game.menuLevel(food.id)}',
+                        label:
+                            '${restaurant.foodName(food)} Lv ${game.menuLevel(food.id)}',
                         description:
                             '${restaurant.translate('idle_cost')} ${game.formatCoins(cost)} / ${restaurant.translate('idle_stronger_item_yield')}',
                         canAfford: game.coins >= cost,
@@ -674,15 +687,14 @@ class GameStatusBar extends StatelessWidget {
     final success = await action();
     if (!context.mounted || success) return;
     final theme = AppTheme.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: theme.danger,
-        content: Text(
-          restaurant.translate('idle_not_enough_coins'),
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        duration: const Duration(seconds: 1),
+    AppMessage.show(
+      context,
+      backgroundColor: theme.danger,
+      content: Text(
+        restaurant.translate('idle_not_enough_coins'),
+        style: const TextStyle(fontWeight: FontWeight.bold),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 }
@@ -703,7 +715,7 @@ class _StatPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return Container(
@@ -799,7 +811,7 @@ class _MilestoneTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isPaper = mode == AppThemeMode.paperReceipt;
     final statusLabel = milestone.claimed
@@ -876,7 +888,7 @@ class _MilestoneTile extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 34,
+            height: 44,
             width: double.infinity,
             child: OutlinedButton(
               onPressed: onClaim,

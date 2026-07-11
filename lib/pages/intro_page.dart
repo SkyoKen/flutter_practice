@@ -86,9 +86,10 @@ class IntroPage extends StatelessWidget {
                                         ),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: theme.accent,
-                                          foregroundColor: theme.useHardShadow
-                                              ? theme.ink
-                                              : Colors.black,
+                                          foregroundColor:
+                                              AppTheme.foregroundOn(
+                                            theme.accent,
+                                          ),
                                           side: BorderSide(
                                             color: theme.border,
                                             width: theme.strongBorderWidth,

@@ -1,15 +1,14 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:cyber_table_order/components/order_history_dialog.dart';
 import 'package:cyber_table_order/components/themed_app_dialog.dart';
 import 'package:cyber_table_order/models/game_controller.dart';
-import 'package:cyber_table_order/pages/menu_page.dart';
+import 'package:cyber_table_order/models/onboarding_controller.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
+import 'package:cyber_table_order/pages/menu_page.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
 import 'package:cyber_table_order/theme/theme_controller.dart';
-import 'dart:math';
-import 'package:qr_flutter/qr_flutter.dart'; // 确保已添加 qr_flutter 依赖
+import 'package:cyber_table_order/utils/app_message.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,393 +18,203 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final String _tableId =
-      "T-0${Random().nextInt(100).toString().padLeft(2, '0')}";
+  bool _onboardingScheduled = false;
 
-  static final String _appVersion = "1.3.0";
-  static final String _buildNumber = "20250524";
-
-  final TextEditingController _memberIdController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-
-  @override
-  void dispose() {
-    _memberIdController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  void _scheduleOnboarding() {
+    if (_onboardingScheduled) return;
+    _onboardingScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final onboarding = context.read<OnboardingController>();
+      if (!onboarding.isComplete) {
+        _showOnboardingDialog();
+      }
+    });
   }
 
-  // ----------------------------------------------------------------------
-  // 登录弹窗逻辑
-  // ----------------------------------------------------------------------
-  void _showLoginDialog(BuildContext context) {
-    final restaurant = Provider.of<Restaurant>(context, listen: false);
-    showDialog(
+  void _showOnboardingDialog() {
+    showDialog<void>(
       context: context,
-      builder: (context) {
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final isTerminal = mode == AppThemeMode.neonTerminal;
-        _memberIdController.clear();
-        _passwordController.clear();
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return Consumer2<Restaurant, OnboardingController>(
+          builder: (context, restaurant, onboarding, child) {
+            final step = onboarding.step.clamp(
+              0,
+              OnboardingController.totalSteps - 1,
+            );
+            final titleKey = switch (step) {
+              0 => 'onboarding_auto_title',
+              1 => 'onboarding_upgrade_title',
+              _ => 'onboarding_rush_title',
+            };
+            final descriptionKey = switch (step) {
+              0 => 'onboarding_auto_description',
+              1 => 'onboarding_upgrade_description',
+              _ => 'onboarding_rush_description',
+            };
+            final icon = switch (step) {
+              0 => Icons.auto_awesome,
+              1 => Icons.insights,
+              _ => Icons.bolt,
+            };
+            final isLast = step == OnboardingController.totalSteps - 1;
 
-        InputDecoration loginInputDecoration({
-          required String label,
-          required String hint,
-          required IconData icon,
-        }) {
-          return InputDecoration(
-            labelText: label,
-            hintText: hint,
-            prefixIcon: Icon(icon),
-            fillColor: theme.surfaceHigh,
-            labelStyle: TextStyle(
-              color: theme.ink.withValues(alpha: 0.72),
-              fontFamily: 'Courier',
-            ),
-            hintStyle: TextStyle(color: theme.ink.withValues(alpha: 0.36)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(
-                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-              ),
-              borderSide: BorderSide(
-                color: isTerminal
-                    ? theme.cyan.withValues(alpha: 0.55)
-                    : theme.border,
-                width: isTerminal ? 1 : 2,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(
-                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-              ),
-              borderSide: BorderSide(
-                color: isTerminal ? theme.cyan : theme.accent,
-                width: mode == AppThemeMode.neoBrutalism ? 3 : 2,
-              ),
-            ),
-          );
-        }
-
-        final title = switch (mode) {
-          AppThemeMode.neonTerminal => 'LOGIN::MEMBER',
-          AppThemeMode.paperReceipt => restaurant.translate('member_login'),
-          AppThemeMode.retroOS => 'LOGIN.EXE',
-          AppThemeMode.neoBrutalism => restaurant.translate('member_login'),
-        };
-
-        return ThemedAppDialog(
-          title: title,
-          icon: Icons.person_pin,
-          actions: [
-            ThemedDialogButton(
-              label: restaurant.translate('cancel'),
-              onPressed: () => Navigator.pop(context),
-            ),
-            ThemedDialogButton(
-              label: restaurant.translate('login'),
-              icon: Icons.login,
-              primary: true,
-              onPressed: () {
-                final memberId = _memberIdController.text.trim().isEmpty
-                    ? "GC-${Random().nextInt(9999).toString().padLeft(4, '0')}"
-                    : _memberIdController.text.trim();
-                final userName = "User-$memberId";
-
-                if (memberId.isNotEmpty) {
-                  Provider.of<Restaurant>(context, listen: false)
-                      .login(memberId, userName);
-
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    backgroundColor: isTerminal ? theme.cyan : theme.accent,
-                    content: Text(
-                      "${restaurant.translate('access_granted')}: $userName",
-                      style: TextStyle(
-                        color: isTerminal ? Colors.black : theme.ink,
-                        fontWeight: FontWeight.bold,
+            return ThemedAppDialog(
+              title: restaurant.translate('onboarding_title'),
+              icon: Icons.school_outlined,
+              maxWidth: 460,
+              actions: [
+                ThemedDialogButton(
+                  label: restaurant.translate('onboarding_skip'),
+                  onPressed: () async {
+                    await onboarding.complete();
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    }
+                  },
+                ),
+                ThemedDialogButton(
+                  label: restaurant.translate(
+                    isLast ? 'onboarding_done' : 'onboarding_next',
+                  ),
+                  icon: isLast ? Icons.check : Icons.arrow_forward,
+                  primary: true,
+                  onPressed: () async {
+                    if (isLast) {
+                      await onboarding.complete();
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+                    } else {
+                      await onboarding.advance();
+                    }
+                  },
+                ),
+              ],
+              child: Semantics(
+                liveRegion: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      restaurant.translate(titleKey),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                    duration: Duration(seconds: 1),
-                  ));
-
-                  Navigator.pop(context);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    backgroundColor: theme.danger,
-                    content: Text(
-                      restaurant.translate('login_failed'),
-                      style: TextStyle(
-                        color: mode == AppThemeMode.neonTerminal
-                            ? Colors.black
-                            : Colors.white,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(height: 10),
+                    Text(
+                      restaurant.translate(descriptionKey),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(height: 1.45),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      '${step + 1}/${OnboardingController.totalSteps}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Courier',
                       ),
                     ),
-                    duration: Duration(seconds: 1),
-                  ));
-                }
-              },
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _memberIdController,
-                style: TextStyle(color: theme.ink, fontFamily: 'Courier'),
-                decoration: loginInputDecoration(
-                  label: restaurant.translate('member_id'),
-                  hint: 'e.g. 123456',
-                  icon: Icons.person,
+                  ],
                 ),
               ),
-              SizedBox(height: 15),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                style: TextStyle(color: theme.ink, fontFamily: 'Courier'),
-                decoration: loginInputDecoration(
-                  label: restaurant.translate('password'),
-                  hint: '******',
-                  icon: Icons.lock,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
   }
 
-  // ----------------------------------------------------------------------
-  // QR Code 弹窗逻辑
-  // ----------------------------------------------------------------------
-  void _showQrCodeDialog(BuildContext context) {
-    final restaurant = Provider.of<Restaurant>(context, listen: false);
-    showDialog(
-      context: context,
-      builder: (context) {
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final qrData = "https://app.tableorder.com/table/$_tableId";
-        final title = switch (mode) {
-          AppThemeMode.neonTerminal => 'QR::MOBILE_ORDER',
-          AppThemeMode.paperReceipt => restaurant.translate('mobile_order'),
-          AppThemeMode.retroOS => 'QR_VIEW.EXE',
-          AppThemeMode.neoBrutalism => restaurant.translate('mobile_order'),
-        };
-
-        return ThemedAppDialog(
-          title: title,
-          icon: Icons.qr_code_2,
-          actions: [
-            ThemedDialogButton(
-              label: restaurant.translate('close'),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "${restaurant.translate('scan_to_order')}\nTable ID: $_tableId",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: theme.ink.withValues(alpha: 0.72),
-                  fontSize: 14,
-                  height: 1.35,
+  void _showSettingsDialog(BuildContext pageContext) {
+    showDialog<void>(
+      context: pageContext,
+      builder: (dialogContext) {
+        return Consumer2<Restaurant, ThemeController>(
+          builder: (context, restaurant, themeController, child) {
+            return ThemedAppDialog(
+              title: restaurant.translate('system_config'),
+              icon: Icons.settings,
+              maxWidth: 560,
+              actions: [
+                ThemedDialogButton(
+                  label: restaurant.translate('close'),
+                  primary: true,
+                  onPressed: () => Navigator.pop(dialogContext),
                 ),
-              ),
-              SizedBox(height: 15),
-              Container(
-                width: 220,
-                height: 220,
-                padding: EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(
-                    mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-                  ),
-                  border: Border.all(
-                    color: mode == AppThemeMode.neonTerminal
-                        ? theme.cyan
-                        : theme.border,
-                    width: mode == AppThemeMode.neoBrutalism ? 3 : 2,
-                  ),
-                ),
-                child: Center(
-                  child: QrImageView(
-                    data: qrData,
-                    version: QrVersions.auto,
-                    size: 200.0,
-                    backgroundColor: Colors.white,
-                    errorStateBuilder: (cxt, err) {
-                      return Center(
-                        child: Text(
-                          "QR Error",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: theme.danger),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              SizedBox(height: 15),
-              Text(
-                mode == AppThemeMode.neonTerminal
-                    ? "STREAM $qrData"
-                    : "Data Stream: $qrData",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: theme.ink.withValues(alpha: 0.54),
-                  fontSize: 10,
-                  fontFamily: 'Courier',
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // 呼叫服务员逻辑
-  void _callWaiter(BuildContext context) {
-    final restaurant = Provider.of<Restaurant>(context, listen: false);
-    final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
-
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      backgroundColor: isTerminal ? theme.cyan : theme.amber,
-      content: Row(
-        children: [
-          Icon(Icons.ring_volume, color: isTerminal ? Colors.black : theme.ink),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "${restaurant.translate('waiter_called')} $_tableId.",
-              style: TextStyle(
-                color: isTerminal ? Colors.black : theme.ink,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Courier',
-              ),
-            ),
-          ),
-        ],
-      ),
-      duration: Duration(seconds: 2),
-    ));
-  }
-
-  // ----------------------------------------------------------------------
-  // 系统设置弹窗
-  // ----------------------------------------------------------------------
-  void _showSettingsDialog(BuildContext context) {
-    final restaurant = Provider.of<Restaurant>(context, listen: false);
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        final theme = AppTheme.of(context);
-        final mode = AppTheme.activeMode;
-        final title = switch (mode) {
-          AppThemeMode.neonTerminal => 'CONFIG::SYSTEM',
-          AppThemeMode.paperReceipt => restaurant.translate('system_config'),
-          AppThemeMode.retroOS => 'CONFIG.EXE',
-          AppThemeMode.neoBrutalism => restaurant.translate('system_config'),
-        };
-
-        return ThemedAppDialog(
-          title: title,
-          icon: Icons.settings,
-          maxWidth: 560,
-          actions: [
-            ThemedDialogButton(
-              label: restaurant.translate('close'),
-              primary: true,
-              onPressed: () => Navigator.pop(context),
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSettingSectionLabel(context, "Language"),
-              SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildLanguageOption(context, "EN", "en", restaurant),
-                  _buildLanguageOption(context, "中文", "zh", restaurant),
-                  _buildLanguageOption(context, "日本語", "ja", restaurant),
-                ],
-              ),
-              SizedBox(height: 18),
-              Consumer<ThemeController>(
-                builder: (context, themeController, child) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  _buildSettingSectionLabel(
+                    context,
+                    restaurant.translate('settings_language'),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      _buildSettingSectionLabel(context, "Theme"),
-                      SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: AppThemeMode.values
-                            .map((mode) => _buildThemeOption(
-                                  context,
-                                  mode,
-                                  themeController,
-                                ))
-                            .toList(),
+                      _buildLanguageOption(
+                        label: 'EN',
+                        code: 'en',
+                        restaurant: restaurant,
+                      ),
+                      _buildLanguageOption(
+                        label: '中文',
+                        code: 'zh',
+                        restaurant: restaurant,
+                      ),
+                      _buildLanguageOption(
+                        label: '日本語',
+                        code: 'ja',
+                        restaurant: restaurant,
                       ),
                     ],
-                  );
-                },
-              ),
-              _buildSettingItem(context, "Notifications", "Enabled"),
-              SizedBox(height: 12),
-              ThemedDialogButton(
-                label: restaurant.translate('reset_idle_save'),
-                icon: Icons.restart_alt,
-                destructive: true,
-                onPressed: () => _resetIdleSave(context),
-              ),
-              Divider(color: theme.ink.withValues(alpha: 0.2), height: 30),
-              Text("ABOUT APP",
-                  style: TextStyle(
-                      color: theme.accent,
-                      fontSize: 12,
-                      fontFamily: 'Courier',
-                      fontWeight: FontWeight.bold)),
-              SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("Version",
-                      style:
-                          TextStyle(color: theme.ink.withValues(alpha: 0.64))),
-                  Text("v$_appVersion",
-                      style:
-                          TextStyle(color: theme.ink, fontFamily: 'Courier')),
+                  ),
+                  const SizedBox(height: 18),
+                  _buildSettingSectionLabel(
+                    context,
+                    restaurant.translate('settings_theme'),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: AppThemeMode.values
+                        .map(
+                          (themeMode) => _buildThemeOption(
+                            mode: themeMode,
+                            controller: themeController,
+                            restaurant: restaurant,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ThemedDialogButton(
+                      label: restaurant.translate('reset_idle_save'),
+                      icon: Icons.restart_alt,
+                      destructive: true,
+                      onPressed: () => _confirmAndResetIdleSave(
+                        pageContext: pageContext,
+                        settingsDialogContext: dialogContext,
+                        restaurant: restaurant,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("Build Number",
-                      style:
-                          TextStyle(color: theme.ink.withValues(alpha: 0.64))),
-                  Text(_buildNumber,
-                      style:
-                          TextStyle(color: theme.ink, fontFamily: 'Courier')),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -423,588 +232,211 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildLanguageOption(
-    BuildContext context,
-    String label,
-    String code,
-    Restaurant restaurant,
-  ) {
+  Widget _buildLanguageOption({
+    required String label,
+    required String code,
+    required Restaurant restaurant,
+  }) {
     return ThemedOptionTile(
       label: label,
       selected: restaurant.languageCode == code,
       minWidth: 72,
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      onTap: () {
-        restaurant.setLanguage(code);
-        Navigator.pop(context);
-        _showSettingsDialog(context);
-      },
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      onTap: () => restaurant.setLanguage(code),
     );
   }
 
-  Widget _buildThemeOption(
-    BuildContext context,
-    AppThemeMode mode,
-    ThemeController controller,
-  ) {
+  Widget _buildThemeOption({
+    required AppThemeMode mode,
+    required ThemeController controller,
+    required Restaurant restaurant,
+  }) {
     return ThemedOptionTile(
-      label: mode.label,
-      description: mode.description,
+      label: restaurant.translate(mode.labelKey),
+      description: restaurant.translate(mode.descriptionKey),
       selected: controller.mode == mode,
       minWidth: 132,
       onTap: () => controller.setMode(mode),
     );
   }
 
-  Future<void> _resetIdleSave(BuildContext context) async {
-    final game = context.read<GameController>();
-    final restaurant = context.read<Restaurant>();
-    await game.reset();
-    if (!context.mounted) return;
-    final theme = AppTheme.of(context);
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: theme.surfaceHigh,
-        content: Text(
-          restaurant.translate('idle_save_reset'),
-          style: TextStyle(
-            color: theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
-          ),
-        ),
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
-
-  Widget _buildSettingItem(BuildContext context, String title, String value) {
-    final theme = AppTheme.of(context);
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(title,
-              style: TextStyle(color: theme.ink.withValues(alpha: 0.72))),
-          Text(value,
-              style: TextStyle(
-                  color: theme.cyan,
-                  fontFamily: 'Courier',
-                  fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  // ----------------------------------------------------------------------
-  // 历史记录弹窗 (小票样式)
-  // ----------------------------------------------------------------------
-  void _showHistoryLog(BuildContext context, Restaurant restaurant) {
-    showDialog(
-      context: context,
-      builder: (context) => OrderHistoryDialog(
-        restaurant: restaurant,
-        tableId: _tableId,
-      ),
-    );
-  }
-
-  // 会员信息弹窗
-  void _buildMemberProfileDialog(BuildContext context, Restaurant restaurant) {
-    final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
-    final isTerminal = mode == AppThemeMode.neonTerminal;
-    final title = switch (mode) {
-      AppThemeMode.neonTerminal => 'MEMBER::PROFILE',
-      AppThemeMode.paperReceipt => restaurant.translate('member_profile'),
-      AppThemeMode.retroOS => 'PROFILE.EXE',
-      AppThemeMode.neoBrutalism => restaurant.translate('member_profile'),
-    };
-
-    Widget buildInfoRow(
-        IconData icon, String label, String value, Color color) {
-      return Padding(
-        padding: EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 20),
-            SizedBox(width: 10),
-            Text(label,
-                style: TextStyle(
-                    color: theme.ink.withValues(alpha: 0.62),
-                    fontSize: 14,
-                    fontFamily: 'Courier')),
-            Spacer(),
-            Text(value,
-                style: TextStyle(
-                    color: theme.ink,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'Courier')),
-          ],
-        ),
-      );
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) {
+  Future<void> _confirmAndResetIdleSave({
+    required BuildContext pageContext,
+    required BuildContext settingsDialogContext,
+    required Restaurant restaurant,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: settingsDialogContext,
+      builder: (confirmationContext) {
+        final theme = AppTheme.of(confirmationContext);
         return ThemedAppDialog(
-          title: title,
-          icon: Icons.person_pin,
-          maxWidth: 460,
+          title: restaurant.translate('reset_idle_save'),
+          icon: Icons.warning_amber,
+          maxWidth: 400,
           actions: [
             ThemedDialogButton(
-              label: restaurant.translate('logout'),
-              destructive: true,
-              onPressed: () {
-                restaurant.logout();
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  backgroundColor: theme.surfaceHigh,
-                  content: Text(
-                    "Logged out successfully.",
-                    style: TextStyle(
-                      color: theme.ink,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  duration: Duration(seconds: 1),
-                ));
-              },
+              label: restaurant.translate('cancel'),
+              onPressed: () => Navigator.pop(confirmationContext, false),
             ),
             ThemedDialogButton(
-              label: restaurant.translate('close'),
-              onPressed: () => Navigator.pop(context),
+              label: restaurant.translate('confirm'),
+              icon: Icons.restart_alt,
+              destructive: true,
+              onPressed: () => Navigator.pop(confirmationContext, true),
             ),
           ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              buildInfoRow(Icons.person_pin, restaurant.translate('nickname'),
-                  restaurant.getUserName.toUpperCase(), theme.accent),
-              buildInfoRow(
-                Icons.credit_card,
-                restaurant.translate('member_id'),
-                restaurant.getMemberId,
-                isTerminal ? theme.cyan : theme.accentSoft,
-              ),
-              Divider(color: theme.ink.withValues(alpha: 0.18), height: 30),
-              Text(
-                restaurant.translate('coupons'),
-                style: TextStyle(
-                  color: theme.ink,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  fontFamily: 'Courier',
+              Icon(Icons.delete_forever, color: theme.danger, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${restaurant.translate('reset_idle_save')}?',
+                  style: TextStyle(
+                    color: theme.ink,
+                    fontWeight: FontWeight.w700,
+                    height: 1.4,
+                  ),
                 ),
               ),
-              SizedBox(height: 10),
-              ...restaurant.getCoupons.map((coupon) => Padding(
-                    padding: EdgeInsets.only(bottom: 8.0),
-                    child: Container(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: mode == AppThemeMode.neonTerminal
-                            ? theme.background.withValues(alpha: 0.36)
-                            : theme.surfaceHigh,
-                        borderRadius: BorderRadius.circular(
-                          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-                        ),
-                        border: Border.all(
-                          color: isTerminal
-                              ? theme.cyan.withValues(alpha: 0.5)
-                              : theme.border,
-                          width: mode == AppThemeMode.neoBrutalism ? 2 : 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Icon(Icons.star, color: theme.amber, size: 16),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              coupon,
-                              style: TextStyle(
-                                color: theme.ink,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'Courier',
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () {},
-                            child: Text(restaurant.translate('use'),
-                                style: TextStyle(
-                                    color:
-                                        isTerminal ? theme.cyan : theme.accent,
-                                    fontSize: 12)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )),
             ],
           ),
         );
       },
     );
+
+    if (confirmed != true || !pageContext.mounted) return;
+
+    await pageContext.read<GameController>().reset();
+    if (!pageContext.mounted) return;
+
+    if (settingsDialogContext.mounted) {
+      Navigator.pop(settingsDialogContext);
+    }
+
+    final theme = AppTheme.of(pageContext);
+    AppMessage.show(
+      pageContext,
+      backgroundColor: theme.surfaceHigh,
+      content: Text(
+        restaurant.translate('idle_save_reset'),
+        style: TextStyle(
+          color: theme.ink,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
+        ),
+      ),
+      duration: const Duration(seconds: 2),
+    );
   }
 
-  Color _appBarBackgroundColor() {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.neonTerminal:
-        return AppTheme.surface;
-      case AppThemeMode.paperReceipt:
-        return AppTheme.surface;
-      case AppThemeMode.retroOS:
-        return AppTheme.accent;
-      case AppThemeMode.neoBrutalism:
-        return AppTheme.amber;
-    }
+  Color _appBarBackgroundColor(BuildContext context) {
+    final theme = AppTheme.of(context);
+    return switch (AppTheme.modeOf(context)) {
+      AppThemeMode.neonTerminal => theme.surface,
+      AppThemeMode.paperReceipt => theme.surface,
+      AppThemeMode.retroOS => theme.accent,
+      AppThemeMode.neoBrutalism => theme.amber,
+    };
   }
 
-  Color _appBarForegroundColor() {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.neonTerminal:
-        return AppTheme.cyan;
-      case AppThemeMode.retroOS:
-        return Colors.white;
-      case AppThemeMode.paperReceipt:
-      case AppThemeMode.neoBrutalism:
-        return AppTheme.ink;
-    }
+  Color _appBarForegroundColor(BuildContext context) {
+    final theme = AppTheme.of(context);
+    return switch (AppTheme.modeOf(context)) {
+      AppThemeMode.neonTerminal => theme.cyan,
+      AppThemeMode.retroOS => Colors.white,
+      AppThemeMode.paperReceipt || AppThemeMode.neoBrutalism => theme.ink,
+    };
   }
 
-  String _appBarTitleText(bool compact) {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.neonTerminal:
-        return compact ? _tableId : 'TERMINAL // $_tableId';
-      case AppThemeMode.paperReceipt:
-        return compact ? 'TABLE $_tableId' : 'ORDER SLIP // TABLE $_tableId';
-      case AppThemeMode.retroOS:
-        return compact ? _tableId : 'TABLE NOVA - $_tableId';
-      case AppThemeMode.neoBrutalism:
-        return compact ? _tableId : 'ACCESS ID: $_tableId';
-    }
-  }
-
-  IconData _appBarTitleIcon() {
-    switch (AppTheme.activeMode) {
-      case AppThemeMode.neonTerminal:
-        return Icons.terminal;
-      case AppThemeMode.paperReceipt:
-        return Icons.receipt_long;
-      case AppThemeMode.retroOS:
-        return Icons.window;
-      case AppThemeMode.neoBrutalism:
-        return Icons.qr_code_2;
-    }
+  IconData _appBarTitleIcon(BuildContext context) {
+    return switch (AppTheme.modeOf(context)) {
+      AppThemeMode.neonTerminal => Icons.terminal,
+      AppThemeMode.paperReceipt => Icons.receipt_long,
+      AppThemeMode.retroOS => Icons.window,
+      AppThemeMode.neoBrutalism => Icons.storefront,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<Restaurant>(
       builder: (context, restaurant, child) {
-        final compactAppBar = MediaQuery.sizeOf(context).width < 700;
-        final mode = AppTheme.activeMode;
-        final appBarForeground = _appBarForegroundColor();
-        final appBarBorderColor =
-            mode == AppThemeMode.neonTerminal ? AppTheme.cyan : AppTheme.ink;
-        final appBarBorderWidth = switch (mode) {
-          AppThemeMode.neonTerminal => 1.0,
-          AppThemeMode.paperReceipt => 1.0,
+        final gameLoaded = context.select<GameController, bool>(
+          (game) => game.isLoaded,
+        );
+        final onboardingReady = context.select<OnboardingController, bool>(
+          (onboarding) => onboarding.isLoaded && !onboarding.isComplete,
+        );
+        if (gameLoaded && onboardingReady) {
+          _scheduleOnboarding();
+        }
+        final theme = AppTheme.of(context);
+        final mode = AppTheme.modeOf(context);
+        final foreground = _appBarForegroundColor(context);
+        final borderColor =
+            mode == AppThemeMode.neonTerminal ? theme.cyan : theme.ink;
+        final borderWidth = switch (mode) {
+          AppThemeMode.neonTerminal || AppThemeMode.paperReceipt => 1.0,
           AppThemeMode.retroOS => 2.0,
           AppThemeMode.neoBrutalism => 3.0,
         };
-        final drawerHeaderBackground = _appBarBackgroundColor();
-        final drawerHeaderForeground = _appBarForegroundColor();
 
         return Scaffold(
-          backgroundColor: AppTheme.background,
+          backgroundColor: theme.background,
           appBar: AppBar(
-            title: compactAppBar
-                ? Text(_appBarTitleText(true),
-                    style: TextStyle(
-                        color: appBarForeground,
-                        fontFamily: 'Courier',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900))
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _appBarTitleIcon(),
-                        color: appBarForeground,
-                        size: 20,
-                      ),
-                      SizedBox(width: 8),
-                      Text(_appBarTitleText(false),
-                          style: TextStyle(
-                              color: appBarForeground,
-                              fontFamily: 'Courier',
-                              fontSize: 14,
-                              fontWeight: FontWeight.w900)),
-                    ],
-                  ),
-            centerTitle: true,
-            backgroundColor: _appBarBackgroundColor(),
+            automaticallyImplyLeading: false,
+            backgroundColor: _appBarBackgroundColor(context),
             elevation: 0,
+            centerTitle: false,
             shape: Border(
-              bottom: BorderSide(
-                color: appBarBorderColor,
-                width: appBarBorderWidth,
-              ),
+              bottom: BorderSide(color: borderColor, width: borderWidth),
             ),
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: Icon(Icons.menu_book, color: appBarForeground),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-                tooltip: restaurant.translate('system_menu'),
-              ),
-            ),
-            actions: [
-              if (compactAppBar)
-                IconButton(
-                  onPressed: () => _showQrCodeDialog(context),
-                  icon: Icon(Icons.qr_code_scanner,
-                      color: appBarForeground, size: 20),
-                  tooltip: restaurant.translate('mobile_qr'),
-                )
-              else
-                TextButton.icon(
-                  onPressed: () => _showQrCodeDialog(context),
-                  icon: Icon(Icons.qr_code_scanner,
-                      color: appBarForeground, size: 20),
-                  label: Text(restaurant.translate('mobile_qr'),
-                      style: TextStyle(
-                          color: appBarForeground,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900)),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-              if (compactAppBar)
-                IconButton(
-                  onPressed: () => _callWaiter(context),
-                  icon: Icon(
-                    Icons.notifications_active,
-                    color: appBarForeground,
-                    size: 20,
-                  ),
-                  tooltip: restaurant.translate('help'),
-                )
-              else
-                TextButton.icon(
-                  onPressed: () => _callWaiter(context),
-                  icon: Icon(
-                    Icons.notifications_active,
-                    color: appBarForeground,
-                    size: 20,
-                  ),
-                  label: Text(restaurant.translate('help'),
-                      style: TextStyle(
-                          color: appBarForeground,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900)),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-              Padding(
-                padding: EdgeInsets.only(right: compactAppBar ? 4.0 : 15.0),
-                child: IconButton(
-                  onPressed: restaurant.getIsLoggedIn
-                      ? () => _buildMemberProfileDialog(context, restaurant)
-                      : () => _showLoginDialog(context),
-                  icon: Icon(
-                    Icons.person_pin,
-                    color: appBarForeground,
-                    size: 28,
-                  ),
-                  tooltip: restaurant.getIsLoggedIn
-                      ? restaurant.translate('member_tooltip_profile')
-                      : restaurant.translate('member_tooltip_login'),
-                ),
-              )
-            ],
-          ),
-          drawer: Drawer(
-            backgroundColor: AppTheme.surface,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            titleSpacing: 16,
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Column(
-                  children: [
-                    Container(
-                      padding: EdgeInsets.symmetric(
-                          horizontal: 16.0, vertical: 24.0),
-                      decoration: BoxDecoration(
-                        color: drawerHeaderBackground,
-                        border: Border(
-                          bottom: BorderSide(
-                            color: appBarBorderColor,
-                            width: appBarBorderWidth,
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            restaurant.getIsLoggedIn
-                                ? Icons.verified_user
-                                : Icons.no_accounts,
-                            size: 40,
-                            color: restaurant.getIsLoggedIn
-                                ? drawerHeaderForeground
-                                : drawerHeaderForeground.withValues(
-                                    alpha: 0.58),
-                          ),
-                          SizedBox(width: 15),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                restaurant.getIsLoggedIn
-                                    ? restaurant.translate('status_online')
-                                    : restaurant.translate('status_offline'),
-                                style: TextStyle(
-                                  color: restaurant.getIsLoggedIn
-                                      ? drawerHeaderForeground
-                                      : drawerHeaderForeground.withValues(
-                                          alpha: 0.64,
-                                        ),
-                                  fontSize: 12,
-                                  fontFamily: 'Courier',
-                                ),
-                              ),
-                              Text(
-                                restaurant.getIsLoggedIn
-                                    ? "${restaurant.translate('user')}: ${restaurant.getUserName}"
-                                    : restaurant.translate('guest_mode'),
-                                style: TextStyle(
-                                  color: drawerHeaderForeground,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 18,
-                                  fontFamily: 'Courier',
-                                ),
-                              ),
-                              if (restaurant.getIsLoggedIn)
-                                Text(
-                                  "${restaurant.translate('id')}: ${restaurant.getMemberId}",
-                                  style: TextStyle(
-                                    color: Colors.grey[500],
-                                    fontSize: 12,
-                                    fontFamily: 'Courier',
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    ListTile(
-                      leading: Icon(Icons.history, color: AppTheme.ink),
-                      title: Text(restaurant.translate('history_log'),
-                          style: TextStyle(
-                              color: AppTheme.ink,
-                              fontWeight: FontWeight.w800)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showHistoryLog(context, restaurant);
-                      },
-                    ),
-                    Divider(color: Colors.white10),
-                    ListTile(
-                      leading: Icon(Icons.person_pin,
-                          color: restaurant.getIsLoggedIn
-                              ? AppTheme.ink
-                              : AppTheme.ink.withValues(alpha: 0.62)),
-                      title: Text(
-                          restaurant.getIsLoggedIn
-                              ? restaurant.translate('member_profile')
-                              : restaurant.translate('member_login'),
-                          style: TextStyle(
-                              color: AppTheme.ink,
-                              fontWeight: FontWeight.w800)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (restaurant.getIsLoggedIn) {
-                          _buildMemberProfileDialog(context, restaurant);
-                        } else {
-                          _showLoginDialog(context);
-                        }
-                      },
-                    ),
-                    Divider(color: Colors.white10),
-                    ListTile(
-                      leading: Icon(Icons.settings, color: AppTheme.ink),
-                      title: Text(restaurant.translate('system_config'),
-                          style: TextStyle(
-                              color: AppTheme.ink,
-                              fontWeight: FontWeight.w800)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showSettingsDialog(context);
-                      },
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding:
-                      EdgeInsets.only(left: 25.0, bottom: 25.0, right: 25.0),
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.pop(context);
-                      _callWaiter(context);
-                    },
-                    child: Container(
-                      padding: EdgeInsets.symmetric(vertical: 15),
-                      decoration: BoxDecoration(
-                        color: mode == AppThemeMode.neonTerminal
-                            ? AppTheme.cyan
-                            : mode == AppThemeMode.paperReceipt
-                                ? AppTheme.surface
-                                : AppTheme.amber,
-                        borderRadius: BorderRadius.circular(
-                          mode == AppThemeMode.neoBrutalism ? 4 : 0,
-                        ),
-                        border: Border.all(
-                          color: mode == AppThemeMode.neonTerminal
-                              ? AppTheme.cyan
-                              : AppTheme.ink,
-                          width: mode == AppThemeMode.neoBrutalism ? 3 : 2,
-                        ),
-                        boxShadow: mode == AppThemeMode.neoBrutalism
-                            ? AppTheme.brutalShadow()
-                            : null,
-                      ),
-                      child: Center(
-                        child: Text(
-                          restaurant.translate('call_staff'),
-                          style: TextStyle(
-                            color: mode == AppThemeMode.paperReceipt
-                                ? AppTheme.ink
-                                : Colors.black,
-                            fontWeight: FontWeight.w900,
-                            fontFamily: 'Courier',
-                            fontSize: 15,
-                          ),
-                        ),
-                      ),
+                Icon(_appBarTitleIcon(context), color: foreground, size: 20),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    restaurant.translate('app_title'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foreground,
+                      fontFamily: 'Courier',
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
                 ),
               ],
             ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: IconButton(
+                  onPressed:
+                      gameLoaded ? () => _showSettingsDialog(context) : null,
+                  icon: Icon(
+                    Icons.settings,
+                    color: gameLoaded
+                        ? foreground
+                        : foreground.withValues(alpha: 0.45),
+                    size: 22,
+                  ),
+                  tooltip: restaurant.translate('system_config'),
+                ),
+              ),
+            ],
           ),
-          body: MenuPage(),
+          body: gameLoaded
+              ? const MenuPage()
+              : Center(
+                  child: CircularProgressIndicator(color: theme.accent),
+                ),
         );
       },
     );
