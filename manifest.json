@@ -1,12 +1,12 @@
 {
-    "name": "Cyber Table Order",
-    "short_name": "Cyber Order",
+    "name": "Table Nova",
+    "short_name": "Table Nova",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#121212",
-    "description": "Flutter practice table-ordering app.",
-    "orientation": "portrait-primary",
+    "description": "A local-first idle restaurant management game.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
