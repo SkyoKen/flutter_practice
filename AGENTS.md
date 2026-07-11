@@ -2,38 +2,41 @@
 
 ## リポジトリ概要
 
-このリポジトリは `Cyber Table Order` という Flutter 練習アプリです。Dart package 名は `cyber_table_order` です。現在のアプリ本体は、複数テーマを切り替えられる飲食店・テーブル注文 UI で、言語切り替え、疑似会員ログイン、QR 注文ダイアログ、メニュー絞り込み、カート管理、注文確定、会計、メモリ上の注文履歴を扱います。
+このリポジトリは `TABLE NOVA` という Flutter 製のシングルプレイ・オフラインレストラン経営放置ゲームです。Dart package 名は `cyber_table_order` のまま維持しています。
 
-実装規模は小さく、主なアプリコードはほぼ `lib/` 配下にあります。各 platform ディレクトリは Flutter が生成する標準的な設定・ランナー類です。
+プレイヤーはレストラン経営者として、自動営業の収益を受け取り、座席・サービス・キッチン・料理を強化します。手動の `Kitchen Rush`、料理熟練度、店舗レベル、解放、営業目標、デイリータスク、客タイプ、イベント、最大 8 時間の放置収益を扱います。旧テーブル注文 UI、会員、QR、カート、注文履歴は製品スコープ外です。
 
 ## 最初に確認するファイル
 
-- `pubspec.yaml`: パッケージ情報、SDK 制約、依存関係、アセット登録を確認します。依存は `provider`, `intl`, `qr_flutter`, `google_nav_bar`, Cupertino icons です。`lib/images/` がアセットディレクトリとして登録されています。
-- `analysis_options.yaml`: lint は `package:flutter_lints/flutter.yaml` を利用しています。
-- `lib/main.dart`: アプリの入口です。トップレベルで `ChangeNotifierProvider<Restaurant>` を作り、`IntroPage` から開始します。
-- `lib/models/restaurant.dart`: アプリ状態の中心です。言語、疑似認証・会員情報、メニュー、カート数量、注文履歴、合計金額計算、注文確定を持っています。
-- `lib/models/food.dart`: メニュー項目のモデルです。`Food` はカート内で `Map` のキーとして使われるため、等価性と `hashCode` が `id` ベースになっています。
-- `lib/utils/translations.dart`: `en`, `zh`, `ja` の翻訳テーブルです。新しい UI 文言を追加する場合は 3 言語すべてにキーを追加してください。
-- `lib/pages/intro_page.dart`: 最初の画面と、アプリに入る前の言語切り替えです。
-- `lib/pages/home_page.dart`: アプリの外枠です。AppBar、Drawer、会員ログイン・プロフィール、QR ダイアログ、設定ダイアログ、店員呼び出し、履歴ダイアログを扱います。本文は `MenuPage` です。
-- `lib/pages/menu_page.dart`: メインの注文 UI です。カテゴリ・サブカテゴリ選択、メニューグリッド、カート側パネル、注文確認、会計依頼、履歴ダイアログを持っています。
-- `lib/components/food_tile.dart`: 1 つのメニュー項目を表示するカードです。カートへの追加・削除操作もここにあります。
-- `lib/theme/app_theme_mode.dart`, `lib/theme/app_theme.dart`, `lib/theme/theme_tokens.dart`, `lib/theme/theme_controller.dart`: テーマ切り替えの中心です。現在は `Neon Terminal`, `Neo Brutalism`, `Paper Receipt`, `Retro OS` を扱います。
-- `test/widget_test.dart`: Intro から点餐画面へ進む smoke test と、狭い画面での表示確認を持っています。
-- `test/restaurant_test.dart`: `Restaurant` のカート、合計金額、注文履歴、言語切り替えを確認します。
+- `pubspec.yaml`: SDK 制約、`provider`、`shared_preferences` を確認します。
+- `lib/main.dart`: ゲーム、言語、テーマ、新手ガイドの Controller を Provider で注入し、`IntroPage` から開始します。
+- `lib/models/game_controller.dart`: 自動営業、手動接客、強化、解放、目標、タスク、イベントを調停します。
+- `lib/models/game_storage.dart`, `game_models.dart`, `game_balance.dart`: 保存層、ゲーム値オブジェクト、純粋な経営計算です。
+- `lib/models/food_catalog.dart`: 料理 ID、翻訳キー、解放レベル、基礎報酬の唯一の定義元です。
+- `lib/models/restaurant.dart`: 料理一覧と言語状態を持ちます。
+- `lib/models/food.dart`: 料理モデルです。`id` はゲーム保存データと解放条件で使うため、安定かつユニークにしてください。
+- `lib/pages/intro_page.dart`: 開始画面と開始前の言語切り替えです。
+- `lib/pages/home_page.dart`: 経営画面の AppBar と設定ダイアログを持つ外枠です。
+- `lib/pages/menu_page.dart`: 自動営業舞台、収益受取、運営強化、料理図鑑、目標、Kitchen Rush への主導線です。
+- `lib/components/customer_arrival_stage.dart`: 自動客の来店から退店までを表示します。
+- `lib/components/kitchen_rush_panel.dart`: 手動接客、料理選択、コンボ、班次結果を扱います。
+- `lib/components/game_status_bar.dart`: コイン、収益率、店舗レベルなどを表示します。
+- `lib/utils/translations.dart`: `en`、`zh`、`ja` の翻訳テーブルです。
+- `lib/theme/`: `Neon Terminal`、`Neo Brutalism`、`Paper Receipt`、`Retro OS` のトークンと状態管理です。
+- `test/game_controller_test.dart`: ゲーム状態遷移と保存復元の中心テストです。
+- `test/widget_test.dart`: Intro から経営画面へ進む広幅・狭幅 smoke test です。
 
 ## ディレクトリ構成
 
-- `lib/`: アプリケーションコードです。
-  - `components/`: 再利用する Widget。
-  - `models/`: データモデルや状態オブジェクト。
-  - `pages/`: 画面単位、または大きめの UI。
-  - `theme/`: テーマモード、テーマ token、テーマ状態管理。
-  - `utils/`: 共通ヘルパー。現状は翻訳のみです。
-  - `images/`: 登録済みのアセットディレクトリです。現時点では `logo.jpg` があります。メニュー項目の `imagePath` は複数の画像名を参照していますが、それらのファイルは存在せず、`FoodTile` でもまだ表示されていません。
-- `test/`: Flutter テストです。
-- `android/`, `ios/`, `web/`, `linux/`, `macos/`, `windows/`: Flutter の platform プロジェクトです。platform 固有の作業でない限り、生成ファイルは編集しないでください。
-- `.dart_tool/`, `build/`: ローカル生成物・キャッシュです。手動編集やコミット対象にしないでください。
+- `lib/components/`: 再利用 Widget。
+- `lib/models/`: 料理データ、ゲーム状態、保存処理。
+- `lib/pages/`: 開始画面、経営画面外枠、メインダッシュボード。
+- `lib/theme/`: テーマモード、ThemeData、theme token。
+- `lib/utils/`: 翻訳。
+- `lib/images/`: 旧練習用ファイルが残っていますが、現在は asset 登録も実行時参照もありません。
+- `test/`: model test と widget test。
+- platform ディレクトリ: Flutter のランナーと表示名設定。platform 固有作業以外は必要最小限の編集にしてください。
+- `.dart_tool/`, `build/`: 生成物。手動編集・コミット対象外です。
 
 ## 開発コマンド
 
@@ -47,29 +50,22 @@ flutter test
 flutter run -d chrome
 ```
 
-platform 固有の確認が必要な場合は、対象に合わせて別の `flutter run -d ...` を使ってください。
-
-現時点で分かっている検証状態:
-
-- `flutter analyze` は通ります。
-- `flutter test` は通ります。
-- `flutter pub get` 実行後の package 名は `cyber_table_order` です。
-
 ## 実装方針
 
-- 明示的な要望がない限り、既存の Provider / `ChangeNotifier` パターンを維持してください。
-- 共有される可変状態は `Restaurant` に置きます。UI 更新が必要な変更の後は `notifyListeners()` を呼びます。
-- メニュー項目を追加する場合は、ユニークな `Food.id` を使い、`price` は小数として parse できる文字列にし、`tags` は `MenuPage` のカテゴリ・サブカテゴリ ID と一致させてください。
-- UI 文言を追加する場合は `restaurant.translate(...)` を使い、`Translations` の英語・中国語・日本語すべてにキーを追加してください。
-- UI を追加・変更する場合は、必ずすべてのテーマとの互換性を確認してください。色だけを直接指定せず、まず `AppTheme.of(context)` または `AppTheme` の theme-aware getter を使います。構造差が必要な UI は `AppTheme.activeMode` で分岐し、`Neon Terminal`, `Neo Brutalism`, `Paper Receipt`, `Retro OS` の見た目が破綻しないようにします。
-- `Food.imagePath` を実際に表示する変更を行う場合は、先に実ファイルを `lib/images/` に追加するか、存在するアセットを参照するようにデータを変更してください。
-- 指示がない限り、現在のテーマ構造を維持してください。特定テーマだけに固定された黒背景、白文字、amber などの直書きは避け、ダイアログ、SnackBar、Drawer、ボタン、カードなどもテーマ互換にします。
-- `MenuPage` は幅 900px 以上では 2 カラム、狭い画面ではメニュー上・カート下の縦積み表示になります。レイアウトに関わる変更では、広い画面と狭い画面の両方を確認してください。
-- `HistoryPage` は存在しますが、現在 `HomePage` から直接ルーティングされていません。現状の履歴表示はダイアログ内で実装されています。
-- platform ディレクトリの編集は必要最小限にしてください。通常のアプリ挙動は、まず `lib/` とテストを変更します。
+- Provider / `ChangeNotifier` パターンを維持してください。
+- 永続化されるゲーム状態は `GameController`、料理一覧と言語状態は `Restaurant`、テーマ状態は `ThemeController`、新手ガイドは `OnboardingController` に置きます。
+- `GameController.load()` 完了前にゲーム操作を進めないでください。
+- メニュー項目を追加・変更する場合は `FoodCatalog` のみを定義元とし、安定した `Food.id` と 3 言語の name/description キーを追加してください。
+- UI 文言を追加する場合は `restaurant.translate(...)` を使い、英語・中国語・日本語の全テーブルに同じキーを追加してください。
+- UI 変更は四テーマすべてで確認し、色、角丸、境界、影、テーマモードは `AppTheme.of(context)` / `AppTheme.modeOf(context)` から取得してください。グローバルなテーマ状態を追加しないでください。
+- 主画面は横長かつ幅 820px 以上で左右分割、それ以外は上下配置です。広幅・狭幅・短い画面を考慮してください。
+- 自動営業の Timer、保存、ユーザー操作が重ならないよう、非同期処理の再入を防いでください。
+- 料理画像を導入する場合は、実アセットを追加して `pubspec.yaml` に明示登録し、四テーマの代替表示も用意してください。
+- 旧テーブル注文、会員、QR、呼び出し、カート、注文履歴を再導入しないでください。必要な履歴機能は経営ログまたは班次ログとして設計してください。
 
-## 今後のテスト方針
+## テスト方針
 
-- モデルや状態管理を変更する場合は、カート数量、合計金額、言語変更、注文履歴など、`Restaurant` の振る舞いに対するテストを追加・更新してください。
-- UI を変更する場合は、`MyApp` を pump して `HomePage` に入り、広い画面・狭い画面の両方でカートや注文 UI を確認するテストを更新してください。
-- コード変更を渡す前に、`dart format lib test`、`flutter analyze`、関連テストを実行してください。既存の無関係な lint やテスト失敗が残る場合は、内容を明確に報告してください。
+- ゲームモデル変更では、時刻を固定し、状態遷移、収益、保存復元、上限、重複実行をテストしてください。
+- UI 変更では、四テーマと 390px / 1000px 程度の幅を確認し、主画面は広幅・狭幅 smoke test を更新してください。
+- アニメーション UI は `disableAnimations` も考慮してください。
+- コード変更前の受け渡しでは、`dart format lib test`、`flutter analyze`、`flutter test`、`git diff --check` を実行してください。

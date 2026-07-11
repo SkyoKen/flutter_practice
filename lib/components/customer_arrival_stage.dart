@@ -33,6 +33,8 @@ class CustomerArrivalStage extends StatefulWidget {
 
 class _CustomerArrivalStageState extends State<CustomerArrivalStage>
     with TickerProviderStateMixin {
+  static const int _maxVisibleQueueCustomers = 10;
+
   late final AnimationController _loopController;
   late final AnimationController _coinController;
 
@@ -120,10 +122,11 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
     double coinProgress,
   ) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isRetro = mode == AppThemeMode.retroOS;
     final isPaper = mode == AppThemeMode.paperReceipt;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final now = DateTime.now();
     final customers = game.diningCustomers;
     final manualCustomer = game.manualDiningCustomer;
@@ -153,300 +156,450 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
             : MediaQuery.sizeOf(context).width < 620
                 ? 150.0
                 : 178.0);
+    final semanticsLabel = [
+      title,
+      detail,
+      '${widget.restaurant.translate('idle_entrance_waiting_area')} '
+          '${game.businessQueueCount}/${game.businessMaxQueue}',
+      '${widget.restaurant.translate('idle_business_tables')} '
+          '${game.businessSeatedCount}/${game.diningCapacity}',
+      '${widget.restaurant.translate('idle_business_flow')} '
+          'K${game.businessKitchenQueueCount} '
+          'E${game.businessEatingCount} '
+          'P${game.businessCheckoutQueueCount}',
+    ].join('. ');
 
-    return Container(
-      height: stageHeight,
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      decoration: BoxDecoration(
-        color: isRetro ? theme.surfaceHigh : theme.surface,
-        border: Border(
-          bottom: BorderSide(
-            color: isTerminal ? theme.cyan : theme.border,
-            width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+    return Semantics(
+      key: const ValueKey('customer-arrival-stage-summary'),
+      container: true,
+      label: semanticsLabel,
+      excludeSemantics: true,
+      child: Container(
+        height: stageHeight,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+        decoration: BoxDecoration(
+          color: isRetro ? theme.surfaceHigh : theme.surface,
+          border: Border(
+            bottom: BorderSide(
+              color: isTerminal ? theme.cyan : theme.border,
+              width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+            ),
           ),
+          boxShadow: isTerminal ? theme.softGlow(theme.cyan) : null,
         ),
-        boxShadow: isTerminal ? theme.softGlow(theme.cyan) : null,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          final compact = width < 620;
-          final tall = stageHeight >= 220;
-          final serviceWidth = compact ? 70.0 : 108.0;
-          final floorTop = tall
-              ? compact
-                  ? 86.0
-                  : 92.0
-              : compact
-                  ? 56.0
-                  : 58.0;
-          final floorHeight = tall
-              ? math.max(82.0, stageHeight - floorTop - 30)
-              : compact
-                  ? 62.0
-                  : 92.0;
-          final entranceX = 12.0;
-          final floorLeft = compact ? 42.0 : 56.0;
-          final floorRight = math.max(
-            floorLeft + 80,
-            width - serviceWidth - 16,
-          );
-          final counterCenter = Offset(
-            width - serviceWidth / 2,
-            floorTop + floorHeight * 0.5,
-          );
-          final exitPoint = Offset(entranceX, floorTop + floorHeight / 2);
-          final tableCenters = _tableCenters(
-            tableCount: tableCount,
-            floorLeft: floorLeft,
-            floorRight: floorRight,
-            floorTop: floorTop,
-            floorHeight: floorHeight,
-            compact: compact,
-          );
-          final fallbackTable = tableCenters.isEmpty
-              ? Offset(floorLeft, floorTop + floorHeight / 2)
-              : tableCenters[
-                  activeTableIndex.clamp(0, tableCenters.length - 1).toInt()];
-          final cycle = loopProgress * math.pi * 2;
-          final queueCustomers = customers
-              .where(
-                (customer) =>
-                    customer.phase == GameDiningCustomerPhase.queueing,
-              )
-              .toList();
-          final servingCustomers = customers
-              .where(
-                (customer) =>
-                    customer.phase == GameDiningCustomerPhase.servingFood,
-              )
-              .toList();
-          final checkoutCustomers = customers
-              .where(
-                (customer) =>
-                    customer.phase == GameDiningCustomerPhase.checkout,
-              )
-              .toList();
-          final leavingPoint = Offset(
-            lerpDouble(counterCenter.dx, exitPoint.dx, coinProgress)!,
-            lerpDouble(counterCenter.dy, exitPoint.dy, coinProgress)!,
-          );
-
-          Offset tablePointFor(GameDiningCustomer customer) {
-            if (tableCenters.isEmpty) return fallbackTable;
-            final index = (customer.seatIndex ?? 0)
-                .clamp(0, tableCenters.length - 1)
-                .toInt();
-            return tableCenters[index];
-          }
-
-          Offset queuePointFor(GameDiningCustomer customer) {
-            final queueIndex = math.max(
-                0, queueCustomers.indexWhere((c) => c.id == customer.id));
-            return Offset(
-              entranceX +
-                  queueIndex * (compact ? 13 : 17) +
-                  math.sin(cycle + queueIndex * 0.7) * 2,
-              floorTop +
-                  floorHeight / 2 +
-                  math.sin(cycle + queueIndex * 1.1) * 2,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final compact = width < 620;
+            final tall = stageHeight >= 220;
+            final serviceWidth = compact ? 70.0 : 108.0;
+            final floorTop = largeText
+                ? tall
+                    ? 116.0
+                    : 98.0
+                : tall
+                    ? compact
+                        ? 86.0
+                        : 92.0
+                    : compact
+                        ? 56.0
+                        : 58.0;
+            final desiredFloorHeight = tall
+                ? math.max(82.0, stageHeight - floorTop - 30)
+                : compact
+                    ? 62.0
+                    : 92.0;
+            final floorHeight = math.min(
+              desiredFloorHeight,
+              math.max(48.0, constraints.maxHeight - floorTop),
             );
-          }
+            final waitingAreaLeft = 0.0;
+            final waitingAreaWidth = compact ? 70.0 : 94.0;
+            final entranceLeft = waitingAreaWidth + (compact ? 6 : 8);
+            final entranceCenter = Offset(
+              entranceLeft + 14,
+              floorTop + floorHeight / 2,
+            );
+            final floorLeft = entranceLeft + (compact ? 38 : 46);
+            final floorRight = math.max(
+              floorLeft + 80,
+              width - serviceWidth - 16,
+            );
+            final counterCenter = Offset(
+              width - serviceWidth / 2,
+              floorTop + floorHeight * 0.5,
+            );
+            final exitPoint = entranceCenter;
+            final tableCenters = _tableCenters(
+              tableCount: tableCount,
+              floorLeft: floorLeft,
+              floorRight: floorRight,
+              floorTop: floorTop,
+              floorHeight: floorHeight,
+              compact: compact,
+            );
+            final fallbackTable = tableCenters.isEmpty
+                ? Offset(floorLeft, floorTop + floorHeight / 2)
+                : tableCenters[
+                    activeTableIndex.clamp(0, tableCenters.length - 1).toInt()];
+            final cycle = loopProgress * math.pi * 2;
+            final autoQueueCustomers = customers
+                .where(
+                  (customer) =>
+                      customer.isAuto &&
+                      customer.phase == GameDiningCustomerPhase.queueing,
+                )
+                .toList();
+            final manualCustomerUsesQueueSlot =
+                manualCustomer?.phase == GameDiningCustomerPhase.queueing;
+            final queueCustomerSize = compact ? 24.0 : 30.0;
+            final queueGap = compact ? 4.0 : 6.0;
+            final queuePadding = compact ? 5.0 : 7.0;
+            const queueColumnCount = 2;
 
-          Offset customerPointFor(GameDiningCustomer customer) {
-            final tablePoint = tablePointFor(customer);
-            final phaseProgress =
-                game.diningCustomerPhaseProgress(customer, now);
-            if (customer.phase == GameDiningCustomerPhase.queueing) {
-              return queuePointFor(customer);
-            }
-            if (customer.phase == GameDiningCustomerPhase.seating) {
-              final from = Offset(entranceX, floorTop + floorHeight / 2);
-              return Offset(
-                lerpDouble(from.dx, tablePoint.dx, phaseProgress)!,
-                lerpDouble(from.dy, tablePoint.dy, phaseProgress)!,
+            int queueRowsForHeight(double height) {
+              final availableHeight = math.max(
+                queueCustomerSize,
+                height - queuePadding * 2,
+              );
+              return math.max(
+                1,
+                ((availableHeight + queueGap) / (queueCustomerSize + queueGap))
+                    .floor(),
               );
             }
-            if (customer.phase == GameDiningCustomerPhase.leaving) {
+
+            final baseQueueRows = queueRowsForHeight(floorHeight);
+            final baseQueueCapacity = math.min(
+              _maxVisibleQueueCustomers,
+              baseQueueRows * queueColumnCount,
+            );
+            final totalQueueCandidates = autoQueueCustomers.length +
+                (manualCustomerUsesQueueSlot ? 1 : 0);
+            final queueNeedsOverflowBadge =
+                totalQueueCandidates > baseQueueCapacity;
+            final queueBadgeSpace = queueNeedsOverflowBadge ? 26.0 : 0.0;
+            final queueContentTop = floorTop + queueBadgeSpace;
+            final queueContentHeight = math.max(
+              queueCustomerSize + queuePadding * 2,
+              floorHeight - queueBadgeSpace,
+            );
+            final queueRowCount = queueRowsForHeight(queueContentHeight);
+            final queueCapacity = math.min(
+              _maxVisibleQueueCustomers,
+              queueRowCount * queueColumnCount,
+            );
+            final visibleAutoQueueCapacity = math
+                .max(
+                  0,
+                  queueCapacity - (manualCustomerUsesQueueSlot ? 1 : 0),
+                )
+                .toInt();
+            final visibleAutoQueueCustomers = autoQueueCustomers
+                .take(visibleAutoQueueCapacity)
+                .toList(growable: false);
+            final autoFloorCustomers = customers
+                .where(
+                  (customer) =>
+                      customer.isAuto &&
+                      customer.phase != GameDiningCustomerPhase.queueing,
+                )
+                .toList();
+            final visibleAutoFloorCustomers = autoFloorCustomers
+                .where(
+                  (customer) => _customerVisibleOnStage(customer, tableCount),
+                )
+                .take(tableCount)
+                .toList(growable: false);
+            final visibleCustomers = <GameDiningCustomer>[
+              ...visibleAutoQueueCustomers,
+              ...visibleAutoFloorCustomers,
+              if (manualCustomer != null) manualCustomer,
+            ];
+            final visibleQueueCustomers = visibleCustomers
+                .where(
+                  (customer) =>
+                      customer.phase == GameDiningCustomerPhase.queueing,
+                )
+                .toList(growable: false);
+            final servingCustomers = visibleCustomers
+                .where(
+                  (customer) =>
+                      customer.phase == GameDiningCustomerPhase.servingFood,
+                )
+                .toList(growable: false);
+            final checkoutCustomers = visibleCustomers
+                .where(
+                  (customer) =>
+                      customer.phase == GameDiningCustomerPhase.checkout,
+                )
+                .toList(growable: false);
+            final queueOverflowCount =
+                autoQueueCustomers.length - visibleAutoQueueCustomers.length;
+            final floorOverflowCount =
+                autoFloorCustomers.length - visibleAutoFloorCustomers.length;
+            final leavingPoint = Offset(
+              lerpDouble(counterCenter.dx, exitPoint.dx, coinProgress)!,
+              lerpDouble(counterCenter.dy, exitPoint.dy, coinProgress)!,
+            );
+
+            Offset tablePointFor(GameDiningCustomer customer) {
+              if (tableCenters.isEmpty) return fallbackTable;
+              final index = (customer.seatIndex ?? 0)
+                  .clamp(0, tableCenters.length - 1)
+                  .toInt();
+              return tableCenters[index];
+            }
+
+            final queueRowOrder = List<int>.generate(
+              queueRowCount,
+              (index) => index,
+            )..sort((a, b) {
+                final center = (queueRowCount - 1) / 2;
+                final distanceCompare =
+                    (a - center).abs().compareTo((b - center).abs());
+                return distanceCompare != 0 ? distanceCompare : a.compareTo(b);
+              });
+
+            Offset queuePointFor(GameDiningCustomer customer) {
+              final queueIndex = math
+                  .max(
+                    0,
+                    visibleQueueCustomers
+                        .indexWhere((c) => c.id == customer.id),
+                  )
+                  .toInt();
+              final column = queueIndex ~/ queueRowCount;
+              final row = queueRowOrder[queueIndex % queueRowCount];
+              final firstRowCenter =
+                  queueContentTop + queuePadding + queueCustomerSize / 2;
               return Offset(
-                lerpDouble(tablePoint.dx, exitPoint.dx, phaseProgress)!,
-                lerpDouble(tablePoint.dy, exitPoint.dy, phaseProgress)!,
+                waitingAreaLeft +
+                    waitingAreaWidth -
+                    queuePadding -
+                    queueCustomerSize / 2 -
+                    column * (queueCustomerSize + queueGap),
+                firstRowCenter + row * (queueCustomerSize + queueGap),
               );
             }
-            return tablePoint;
-          }
 
-          return Stack(
-            children: [
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _stageIcon(manualCustomer, waiting),
-                          size: 16,
-                          color: manualCustomer != null || ready
-                              ? theme.accent
-                              : isTerminal
-                                  ? theme.cyan
-                                  : theme.ink.withValues(alpha: 0.72),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isTerminal ? theme.cyan : theme.ink,
-                              fontWeight: FontWeight.w900,
-                              fontFamily:
-                                  isTerminal || isPaper ? 'Courier' : null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          detail,
-                          style: TextStyle(
+            Offset customerPointFor(GameDiningCustomer customer) {
+              final tablePoint = tablePointFor(customer);
+              final phaseProgress =
+                  game.diningCustomerPhaseProgress(customer, now);
+              if (customer.phase == GameDiningCustomerPhase.queueing) {
+                return queuePointFor(customer);
+              }
+              if (customer.phase == GameDiningCustomerPhase.seating) {
+                return Offset(
+                  lerpDouble(
+                    entranceCenter.dx,
+                    tablePoint.dx,
+                    phaseProgress,
+                  )!,
+                  lerpDouble(
+                    entranceCenter.dy,
+                    tablePoint.dy,
+                    phaseProgress,
+                  )!,
+                );
+              }
+              if (customer.phase == GameDiningCustomerPhase.leaving) {
+                return Offset(
+                  lerpDouble(tablePoint.dx, exitPoint.dx, phaseProgress)!,
+                  lerpDouble(tablePoint.dy, exitPoint.dy, phaseProgress)!,
+                );
+              }
+              return tablePoint;
+            }
+
+            return Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            _stageIcon(manualCustomer, waiting),
+                            size: 16,
                             color: manualCustomer != null || ready
                                 ? theme.accent
-                                : theme.ink,
-                            fontWeight: FontWeight.w900,
-                            fontFamily: 'Courier',
+                                : isTerminal
+                                    ? theme.cyan
+                                    : theme.ink.withValues(alpha: 0.72),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 7),
-                    Row(
-                      children: [
-                        _StageStat(
-                          icon: Icons.people_alt,
-                          label: widget.restaurant
-                              .translate('idle_business_queue'),
-                          value:
-                              '${game.businessQueueCount}/${game.businessMaxQueue}',
-                        ),
-                        const SizedBox(width: 8),
-                        _StageStat(
-                          icon: Icons.table_restaurant,
-                          label: widget.restaurant
-                              .translate('idle_business_tables'),
-                          value:
-                              '${game.businessSeatedCount}/${game.diningCapacity}',
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _StageStat(
-                            icon: Icons.kitchen,
-                            label: widget.restaurant
-                                .translate('idle_business_flow'),
-                            value:
-                                'K${game.businessKitchenQueueCount} E${game.businessEatingCount} P${game.businessCheckoutQueueCount}',
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isTerminal ? theme.cyan : theme.ink,
+                                fontWeight: FontWeight.w900,
+                                fontFamily:
+                                    isTerminal || isPaper ? 'Courier' : null,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                left: entranceX,
-                top: floorTop + floorHeight / 2 - 18,
-                child: _EntranceMarker(
-                  active: ready ||
-                      waiting ||
-                      customers.any(
-                        (customer) =>
-                            customer.phase ==
-                                GameDiningCustomerPhase.queueing ||
-                            customer.phase == GameDiningCustomerPhase.seating,
+                          const SizedBox(width: 8),
+                          Text(
+                            detail,
+                            style: TextStyle(
+                              color: manualCustomer != null || ready
+                                  ? theme.accent
+                                  : theme.ink,
+                              fontWeight: FontWeight.w900,
+                              fontFamily: 'Courier',
+                            ),
+                          ),
+                        ],
                       ),
-                ),
-              ),
-              Positioned(
-                left: floorLeft - 12,
-                right: serviceWidth - 2,
-                top: floorTop + floorHeight / 2 - 1,
-                child: Container(
-                  height: mode == AppThemeMode.neoBrutalism ? 4 : 2,
-                  color: (isTerminal ? theme.cyan : theme.border).withValues(
-                    alpha: waiting || customers.isNotEmpty ? 0.34 : 0.18,
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _StageStat(
+                              icon: Icons.people_alt,
+                              label: widget.restaurant
+                                  .translate('idle_business_queue'),
+                              value:
+                                  '${game.businessQueueCount}/${game.businessMaxQueue}',
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _StageStat(
+                              icon: Icons.table_restaurant,
+                              label: widget.restaurant
+                                  .translate('idle_business_tables'),
+                              value:
+                                  '${game.businessSeatedCount}/${game.diningCapacity}',
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _StageStat(
+                              icon: Icons.kitchen,
+                              label: widget.restaurant
+                                  .translate('idle_business_flow'),
+                              value:
+                                  'K${game.businessKitchenQueueCount} E${game.businessEatingCount} P${game.businessCheckoutQueueCount}',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              for (var index = 0; index < tableCenters.length; index++)
                 Positioned(
-                  left: tableCenters[index].dx - (compact ? 20 : 23),
-                  top: tableCenters[index].dy - (compact ? 15 : 19),
-                  child: _DiningTable(
-                    index: index + 1,
-                    size: compact ? 34 : 46,
-                    active: index == activeTableIndex,
-                    phase: _businessTablePhaseForCustomer(
-                      _customerForSeat(customers, index),
+                  left: waitingAreaLeft,
+                  top: floorTop,
+                  child: _EntranceWaitingArea(
+                    key: const ValueKey('business-entrance-waiting-area'),
+                    width: waitingAreaWidth,
+                    height: floorHeight,
+                    active: visibleQueueCustomers.isNotEmpty,
+                  ),
+                ),
+                Positioned(
+                  left: entranceLeft,
+                  top: floorTop + floorHeight / 2 - 18,
+                  child: _EntranceMarker(
+                    key: const ValueKey('business-entrance-marker'),
+                    active: ready ||
+                        waiting ||
+                        customers.any(
+                          (customer) =>
+                              customer.phase ==
+                                  GameDiningCustomerPhase.queueing ||
+                              customer.phase == GameDiningCustomerPhase.seating,
+                        ),
+                  ),
+                ),
+                Positioned(
+                  left: entranceLeft + 32,
+                  right: serviceWidth - 2,
+                  top: floorTop + floorHeight / 2 - 1,
+                  child: Container(
+                    key: const ValueKey('business-service-route'),
+                    height: mode == AppThemeMode.neoBrutalism ? 4 : 2,
+                    color: (isTerminal ? theme.cyan : theme.border).withValues(
+                      alpha: waiting || customers.isNotEmpty ? 0.34 : 0.18,
                     ),
                   ),
                 ),
-              Positioned(
-                right: 0,
-                top: floorTop - 4,
-                child: _ServiceCounter(
-                  width: serviceWidth,
-                  height: floorHeight + 10,
-                  staffCount: staffCount,
-                  active: serviceActive,
-                ),
-              ),
-              for (var index = 0; index < staffCount; index++)
+                for (var index = 0; index < tableCenters.length; index++)
+                  Positioned(
+                    left: tableCenters[index].dx - (compact ? 20 : 23),
+                    top: tableCenters[index].dy - (compact ? 15 : 19),
+                    child: _DiningTable(
+                      key: ValueKey('business-dining-table-$index'),
+                      index: index + 1,
+                      size: compact ? 34 : 46,
+                      active: index == activeTableIndex,
+                      phase: _businessTablePhaseForCustomer(
+                        _customerForSeat(customers, index),
+                      ),
+                    ),
+                  ),
                 Positioned(
-                  right: 14 + (index % 2) * (compact ? 24 : 28),
-                  top: floorTop +
-                      8 +
-                      (index ~/ 2) * (compact ? 22 : 31) +
-                      math.sin(cycle + index) * (serviceActive ? 2 : 0.8),
-                  child: _ServerSprite(
-                    size: compact ? 20 : 26,
+                  right: 0,
+                  top: floorTop - 4,
+                  child: _ServiceCounter(
+                    width: serviceWidth,
+                    height: floorHeight + 10,
+                    staffCount: staffCount,
                     active: serviceActive,
                   ),
                 ),
-              for (final customer in servingCustomers)
-                Positioned(
-                  left: lerpDouble(
-                        counterCenter.dx,
-                        tablePointFor(customer).dx,
-                        game.diningCustomerPhaseProgress(customer, now),
-                      )! -
-                      (compact ? 10 : 12),
-                  top: lerpDouble(
-                        counterCenter.dy,
-                        tablePointFor(customer).dy,
-                        game.diningCustomerPhaseProgress(customer, now),
-                      )! -
-                      (compact ? 10 : 12),
-                  child: _OrderFlowChip(
-                    index: customer.id,
-                    active: true,
-                    checkout: false,
+                for (var index = 0; index < staffCount; index++)
+                  Positioned(
+                    right: 14 + (index % 2) * (compact ? 24 : 28),
+                    top: floorTop +
+                        8 +
+                        (index ~/ 2) * (compact ? 22 : 31) +
+                        math.sin(cycle + index) * (serviceActive ? 2 : 0.8),
+                    child: _ServerSprite(
+                      size: compact ? 20 : 26,
+                      active: serviceActive,
+                    ),
                   ),
-                ),
-              for (final customer in checkoutCustomers)
-                Positioned(
-                  left: tablePointFor(customer).dx + (compact ? 7 : 12),
-                  top: tablePointFor(customer).dy - (compact ? 22 : 28),
-                  child: _OrderFlowChip(
-                    index: customer.id,
-                    active: true,
-                    checkout: true,
+                for (final customer in servingCustomers)
+                  Positioned(
+                    left: lerpDouble(
+                          counterCenter.dx,
+                          tablePointFor(customer).dx,
+                          game.diningCustomerPhaseProgress(customer, now),
+                        )! -
+                        (compact ? 10 : 12),
+                    top: lerpDouble(
+                          counterCenter.dy,
+                          tablePointFor(customer).dy,
+                          game.diningCustomerPhaseProgress(customer, now),
+                        )! -
+                        (compact ? 10 : 12),
+                    child: _OrderFlowChip(
+                      index: customer.id,
+                      active: true,
+                      checkout: false,
+                    ),
                   ),
-                ),
-              for (final customer in customers)
-                if (_customerVisibleOnStage(customer, tableCenters.length))
+                for (final customer in checkoutCustomers)
+                  Positioned(
+                    left: tablePointFor(customer).dx + (compact ? 7 : 12),
+                    top: tablePointFor(customer).dy - (compact ? 22 : 28),
+                    child: _OrderFlowChip(
+                      index: customer.id,
+                      active: true,
+                      checkout: true,
+                    ),
+                  ),
+                for (final customer in visibleCustomers)
                   Positioned(
                     left: customerPointFor(customer).dx - (compact ? 12 : 14),
                     top: customerPointFor(customer).dy -
@@ -473,66 +626,89 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
                           customer.phase == GameDiningCustomerPhase.checkout,
                     ),
                   ),
-              if (widget.recentCompletedOrders > 0 && widget.coinBurstSeed > 0)
+                if (queueOverflowCount > 0)
+                  Positioned(
+                    left: waitingAreaLeft + 4,
+                    top: floorTop + 3,
+                    child: _CustomerOverflowBadge(
+                      key: const ValueKey('queue-customer-overflow'),
+                      count: queueOverflowCount,
+                      icon: Icons.groups,
+                    ),
+                  ),
+                if (floorOverflowCount > 0)
+                  Positioned(
+                    right: serviceWidth + 8,
+                    top: floorTop + 4,
+                    child: _CustomerOverflowBadge(
+                      key: const ValueKey('floor-customer-overflow'),
+                      count: floorOverflowCount,
+                      icon: Icons.table_restaurant,
+                    ),
+                  ),
+                if (widget.recentCompletedOrders > 0 &&
+                    widget.coinBurstSeed > 0)
+                  Positioned(
+                    left: leavingPoint.dx - (compact ? 12 : 14),
+                    top: leavingPoint.dy -
+                        (compact ? 12 : 14) +
+                        math.sin(cycle * 2) * 2,
+                    child: Opacity(
+                      opacity: (1 - coinProgress).clamp(0, 1).toDouble(),
+                      child: _CustomerSprite(
+                        key: const ValueKey('business-leaving-customer'),
+                        size: compact ? 24 : 28,
+                        waiting: true,
+                        ready: false,
+                        serving: false,
+                      ),
+                    ),
+                  ),
+                if (widget.recentCompletedOrders > 0 &&
+                    widget.coinBurstSeed > 0)
+                  Positioned(
+                    right: compact ? 8 : 18,
+                    top: floorTop +
+                        floorHeight * 0.34 -
+                        coinProgress * (compact ? 18 : 26),
+                    child: Opacity(
+                      opacity: (1 - coinProgress).clamp(0, 1).toDouble(),
+                      child: _CoinBurst(
+                        key: const ValueKey('coin-burst'),
+                        label:
+                            '+${game.formatCoins(game.averageAutoOrderReward * widget.recentCompletedOrders)} x${widget.recentCompletedOrders}',
+                      ),
+                    ),
+                  ),
                 Positioned(
-                  left: leavingPoint.dx - (compact ? 12 : 14),
-                  top: leavingPoint.dy -
-                      (compact ? 12 : 14) +
-                      math.sin(cycle * 2) * 2,
-                  child: Opacity(
-                    opacity: (1 - coinProgress).clamp(0, 1).toDouble(),
-                    child: _CustomerSprite(
-                      key: const ValueKey('business-leaving-customer'),
-                      size: compact ? 24 : 28,
-                      waiting: true,
-                      ready: false,
-                      serving: false,
+                  left: floorLeft,
+                  right: serviceWidth + 10,
+                  bottom: 1,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      minHeight: 5,
+                      value: manualCustomer == null
+                          ? game.businessLoadRatio
+                          : game.diningCustomerPhaseProgress(
+                              manualCustomer,
+                              now,
+                            ),
+                      backgroundColor: theme.ink.withValues(alpha: 0.12),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        manualCustomer != null || ready
+                            ? theme.accent
+                            : isTerminal
+                                ? theme.cyan
+                                : theme.accentSoft,
+                      ),
                     ),
                   ),
                 ),
-              if (widget.recentCompletedOrders > 0 && widget.coinBurstSeed > 0)
-                Positioned(
-                  right: compact ? 8 : 18,
-                  top: floorTop +
-                      floorHeight * 0.34 -
-                      coinProgress * (compact ? 18 : 26),
-                  child: Opacity(
-                    opacity: (1 - coinProgress).clamp(0, 1).toDouble(),
-                    child: _CoinBurst(
-                      key: const ValueKey('coin-burst'),
-                      label:
-                          '+${game.formatCoins(game.averageAutoOrderReward * widget.recentCompletedOrders)} x${widget.recentCompletedOrders}',
-                    ),
-                  ),
-                ),
-              Positioned(
-                left: floorLeft,
-                right: serviceWidth + 10,
-                bottom: 1,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: LinearProgressIndicator(
-                    minHeight: 5,
-                    value: manualCustomer == null
-                        ? game.businessLoadRatio
-                        : game.diningCustomerPhaseProgress(
-                            manualCustomer,
-                            now,
-                          ),
-                    backgroundColor: theme.ink.withValues(alpha: 0.12),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      manualCustomer != null || ready
-                          ? theme.accent
-                          : isTerminal
-                              ? theme.cyan
-                              : theme.accentSoft,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -568,7 +744,7 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
       GameDiningCustomerPhase.seating =>
         widget.restaurant.translate('idle_customer_stage_waiting'),
       GameDiningCustomerPhase.waitingForFood =>
-        '${widget.restaurant.translate('idle_customer_stage_serving')}: ${activeFood?.name ?? ''}',
+        '${widget.restaurant.translate('idle_customer_stage_serving')}: ${activeFood == null ? '' : widget.restaurant.foodName(activeFood)}',
       GameDiningCustomerPhase.servingFood =>
         widget.restaurant.translate('rush_serving_title'),
       GameDiningCustomerPhase.eating =>
@@ -720,11 +896,12 @@ class _StageStat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
 
     return Container(
-      height: 24,
+      height: largeText ? 44 : 24,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: isTerminal
@@ -762,6 +939,66 @@ class _StageStat extends StatelessWidget {
   }
 }
 
+class _CustomerOverflowBadge extends StatelessWidget {
+  final int count;
+  final IconData icon;
+
+  const _CustomerOverflowBadge({
+    super.key,
+    required this.count,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.modeOf(context);
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+
+    return Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: isTerminal
+            ? theme.background.withValues(alpha: 0.88)
+            : theme.surfaceHigh,
+        border: Border.all(
+          color: isTerminal ? theme.cyan : theme.accent,
+          width: mode == AppThemeMode.neoBrutalism ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(
+          mode == AppThemeMode.neoBrutalism ? theme.radius : 11,
+        ),
+        boxShadow: isTerminal
+            ? theme.softGlow(theme.cyan)
+            : mode == AppThemeMode.neoBrutalism
+                ? theme.hardShadow(offset: const Offset(2, 2))
+                : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 12,
+            color: isTerminal ? theme.cyan : theme.accent,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            '+$count',
+            style: TextStyle(
+              color: theme.ink,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Courier',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OrderFlowChip extends StatelessWidget {
   final int index;
   final bool active;
@@ -776,7 +1013,7 @@ class _OrderFlowChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final accent = checkout ? theme.accent : theme.amber;
 
@@ -834,7 +1071,7 @@ class _CoinBurst extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return Container(
@@ -882,6 +1119,7 @@ class _DiningTable extends StatelessWidget {
   final _BusinessTablePhase phase;
 
   const _DiningTable({
+    super.key,
     required this.index,
     required this.size,
     required this.active,
@@ -891,7 +1129,7 @@ class _DiningTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final occupied = phase != _BusinessTablePhase.empty;
     final statusIcon = switch (phase) {
@@ -1002,7 +1240,7 @@ class _ServiceCounter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     return Container(
       width: width,
@@ -1040,15 +1278,64 @@ class _ServiceCounter extends StatelessWidget {
   }
 }
 
-class _EntranceMarker extends StatelessWidget {
+class _EntranceWaitingArea extends StatelessWidget {
+  final double width;
+  final double height;
   final bool active;
 
-  const _EntranceMarker({required this.active});
+  const _EntranceWaitingArea({
+    super.key,
+    required this.width,
+    required this.height,
+    required this.active,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
+    final isTerminal = mode == AppThemeMode.neonTerminal;
+    final accent = isTerminal ? theme.cyan : theme.accent;
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: active
+            ? accent.withValues(alpha: isTerminal ? 0.08 : 0.06)
+            : theme.ink.withValues(alpha: 0.025),
+        border: Border.all(
+          color: accent.withValues(alpha: active ? 0.52 : 0.28),
+          width: mode == AppThemeMode.neoBrutalism ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(
+          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+        ),
+      ),
+      child: Align(
+        alignment: Alignment.bottomLeft,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.groups_outlined,
+            size: 13,
+            color: accent.withValues(alpha: active ? 0.5 : 0.3),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EntranceMarker extends StatelessWidget {
+  final bool active;
+
+  const _EntranceMarker({super.key, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppTheme.of(context);
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     return Container(
       width: 28,
@@ -1099,7 +1386,7 @@ class _CustomerSprite extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final fillColor = serving
         ? theme.accent
@@ -1108,11 +1395,7 @@ class _CustomerSprite extends StatelessWidget {
             : isTerminal
                 ? theme.cyan
                 : theme.surfaceHigh;
-    final iconColor = serving || ready
-        ? (isTerminal ? Colors.black : theme.ink)
-        : isTerminal
-            ? Colors.black
-            : theme.ink;
+    final iconColor = AppTheme.foregroundOn(fillColor);
 
     return Container(
       width: size,
@@ -1157,18 +1440,19 @@ class _ServerSprite extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final backgroundColor = active
+        ? theme.accent
+        : isTerminal
+            ? theme.cyan
+            : theme.surfaceHigh;
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: active
-            ? theme.accent
-            : isTerminal
-                ? theme.cyan
-                : theme.surfaceHigh,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(
           mode == AppThemeMode.neoBrutalism ? theme.radius : size / 2,
         ),
@@ -1187,7 +1471,7 @@ class _ServerSprite extends StatelessWidget {
       child: Icon(
         Icons.room_service,
         size: size * 0.58,
-        color: active || isTerminal ? Colors.black : theme.ink,
+        color: AppTheme.foregroundOn(backgroundColor),
       ),
     );
   }

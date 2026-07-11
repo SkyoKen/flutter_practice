@@ -5,30 +5,18 @@ enum AppThemeMode {
   retroOS,
 }
 
-extension AppThemeModeLabel on AppThemeMode {
-  String get label {
-    switch (this) {
-      case AppThemeMode.neonTerminal:
-        return 'Neon Terminal';
-      case AppThemeMode.neoBrutalism:
-        return 'Neo Brutalism';
-      case AppThemeMode.paperReceipt:
-        return 'Paper Receipt';
-      case AppThemeMode.retroOS:
-        return 'Retro OS';
-    }
-  }
+extension AppThemeModeTranslationKeys on AppThemeMode {
+  String get labelKey => switch (this) {
+        AppThemeMode.neonTerminal => 'theme_neon_terminal_label',
+        AppThemeMode.neoBrutalism => 'theme_neo_brutalism_label',
+        AppThemeMode.paperReceipt => 'theme_paper_receipt_label',
+        AppThemeMode.retroOS => 'theme_retro_os_label',
+      };
 
-  String get description {
-    switch (this) {
-      case AppThemeMode.neonTerminal:
-        return 'Dark terminal neon';
-      case AppThemeMode.neoBrutalism:
-        return 'Bold borders and hard shadows';
-      case AppThemeMode.paperReceipt:
-        return 'Warm paper and receipt ink';
-      case AppThemeMode.retroOS:
-        return 'Classic desktop controls';
-    }
-  }
+  String get descriptionKey => switch (this) {
+        AppThemeMode.neonTerminal => 'theme_neon_terminal_description',
+        AppThemeMode.neoBrutalism => 'theme_neo_brutalism_description',
+        AppThemeMode.paperReceipt => 'theme_paper_receipt_description',
+        AppThemeMode.retroOS => 'theme_retro_os_description',
+      };
 }

@@ -21,8 +21,8 @@ class ThemedAppDialog extends StatelessWidget {
     this.contentPadding = const EdgeInsets.fromLTRB(18, 8, 18, 16),
   });
 
-  BoxDecoration _decoration(AppThemeTokens theme) {
-    switch (AppTheme.activeMode) {
+  BoxDecoration _decoration(BuildContext context, AppThemeTokens theme) {
+    switch (AppTheme.modeOf(context)) {
       case AppThemeMode.neonTerminal:
         return BoxDecoration(
           color: theme.surface,
@@ -59,8 +59,8 @@ class ThemedAppDialog extends StatelessWidget {
     }
   }
 
-  Widget _buildHeader(AppThemeTokens theme) {
-    final mode = AppTheme.activeMode;
+  Widget _buildHeader(BuildContext context, AppThemeTokens theme) {
+    final mode = AppTheme.modeOf(context);
 
     if (mode == AppThemeMode.retroOS) {
       return Container(
@@ -145,7 +145,7 @@ class ThemedAppDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final dialogMaxHeight = MediaQuery.sizeOf(context).height - 48;
     final actionBackground =
         mode == AppThemeMode.retroOS ? theme.surfaceHigh : theme.surface;
@@ -162,12 +162,12 @@ class ThemedAppDialog extends StatelessWidget {
           maxHeight: dialogMaxHeight,
         ),
         child: Container(
-          decoration: _decoration(theme),
+          decoration: _decoration(context, theme),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildHeader(theme),
+              _buildHeader(context, theme),
               Flexible(
                 child: SingleChildScrollView(
                   padding: contentPadding,
@@ -221,7 +221,7 @@ class ThemedDialogButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isPaper = mode == AppThemeMode.paperReceipt;
     final isRetro = mode == AppThemeMode.retroOS;
@@ -269,7 +269,7 @@ class ThemedDialogButton extends StatelessWidget {
     );
 
     return SizedBox(
-      height: 42,
+      height: 48,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
@@ -315,11 +315,10 @@ class ThemedOptionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isPaper = mode == AppThemeMode.paperReceipt;
     final isRetro = mode == AppThemeMode.retroOS;
-    final foregroundColor = selected && isTerminal ? theme.cyan : theme.ink;
     final backgroundColor = selected
         ? isTerminal
             ? theme.cyan.withValues(alpha: 0.14)
@@ -331,6 +330,14 @@ class ThemedOptionTile extends StatelessWidget {
         : isTerminal
             ? Colors.transparent
             : theme.surfaceHigh;
+    final foregroundColor = selected && isTerminal
+        ? theme.cyan
+        : selected
+            ? AppTheme.accessibleForeground(
+                preferred: theme.ink,
+                background: backgroundColor,
+              )
+            : theme.ink;
     final borderColor = selected
         ? isTerminal
             ? theme.cyan
@@ -353,52 +360,57 @@ class ThemedOptionTile extends StatelessWidget {
           )
         : Border.all(color: borderColor, width: borderWidth);
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: BoxConstraints(minWidth: minWidth),
-          padding: padding,
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(
-              mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-            ),
-            border: border,
-            boxShadow: selected && mode == AppThemeMode.neoBrutalism
-                ? theme.hardShadow(offset: const Offset(3, 3))
-                : null,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                isTerminal && selected ? '> $label' : label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: foregroundColor,
-                  fontFamily: isTerminal || isPaper ? 'Courier' : null,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            constraints: BoxConstraints(minWidth: minWidth, minHeight: 48),
+            padding: padding,
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(
+                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
               ),
-              if (description != null) ...[
-                const SizedBox(height: 3),
+              border: border,
+              boxShadow: selected && mode == AppThemeMode.neoBrutalism
+                  ? theme.hardShadow(offset: const Offset(3, 3))
+                  : null,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
-                  description!,
-                  maxLines: 2,
+                  isTerminal && selected ? '> $label' : label,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: foregroundColor.withValues(alpha: 0.62),
-                    fontSize: 10,
-                    height: 1.2,
+                    color: foregroundColor,
+                    fontFamily: isTerminal || isPaper ? 'Courier' : null,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
                   ),
                 ),
+                if (description != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    description!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foregroundColor.withValues(alpha: 0.62),
+                      fontSize: 10,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

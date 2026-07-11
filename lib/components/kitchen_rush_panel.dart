@@ -6,6 +6,7 @@ import 'package:cyber_table_order/models/game_controller.dart';
 import 'package:cyber_table_order/models/restaurant.dart';
 import 'package:cyber_table_order/theme/app_theme.dart';
 import 'package:cyber_table_order/theme/app_theme_mode.dart';
+import 'package:cyber_table_order/utils/app_message.dart';
 
 enum _RushResultKind { success, miss, timeout }
 
@@ -30,6 +31,7 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
   String? _lastResultText;
   _RushResultKind? _lastResultKind;
   bool _handlingTimeout = false;
+  bool _handlingShiftSummary = false;
 
   double _comboMultiplier(int combo) {
     final cappedCombo = combo.clamp(0, 8);
@@ -90,19 +92,18 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     final message = remaining > Duration.zero
         ? '${widget.restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}'
         : widget.restaurant.translate('rush_waiting_table');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: theme.surfaceHigh,
-        content: Text(
-          message,
-          style: TextStyle(
-            color: theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
-          ),
+    AppMessage.show(
+      context,
+      backgroundColor: theme.surfaceHigh,
+      content: Text(
+        message,
+        style: TextStyle(
+          color: theme.ink,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
   }
 
@@ -126,6 +127,23 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     });
   }
 
+  void _queueShiftSummary(GameController game) {
+    if (_handlingShiftSummary || !game.shiftReadyToFinish) return;
+    _handlingShiftSummary = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final summary = await game.finishShift();
+      if (!mounted) return;
+      setState(() {
+        _combo = 0;
+        _handlingShiftSummary = false;
+      });
+      if (summary.hasActivity) {
+        _showShiftSummary(context, summary);
+      }
+    });
+  }
+
   Future<void> _chooseDish(
     BuildContext context,
     GameController game,
@@ -144,20 +162,20 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     });
 
     final theme = AppTheme.of(context);
-    final isTerminal = AppTheme.activeMode == AppThemeMode.neonTerminal;
+    final isTerminal = AppTheme.modeOf(context) == AppThemeMode.neonTerminal;
+    final feedbackBackground = isTerminal ? theme.cyan : theme.accent;
 
     if (!isCorrect) {
       await game.recordWrongDish();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: theme.danger,
-          content: Text(
-            widget.restaurant.translate('rush_wrong'),
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          duration: const Duration(seconds: 1),
+      AppMessage.show(
+        context,
+        backgroundColor: theme.danger,
+        content: Text(
+          widget.restaurant.translate('rush_wrong'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        duration: const Duration(seconds: 1),
       );
       return;
     }
@@ -169,6 +187,7 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     final multiplier = _comboMultiplier(nextCombo) * speedMultiplier;
     final reward = await game.serveCustomerOrder(
       widget.menu.map((food) => food.id).toList(),
+      selectedFoodId: choice.id,
       rewardMultiplier: multiplier,
       combo: nextCombo,
     );
@@ -178,40 +197,29 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
       _combo = nextCombo;
       _lastChoiceId = null;
       _lastChoiceCorrect = null;
+      final expectedBill =
+          '${widget.restaurant.translate('rush_expected_bill')} +${game.formatCoins(reward)}';
       _lastResultText = newBestCombo
-          ? '${widget.restaurant.translate('rush_new_best')} x$nextCombo'
-          : '${widget.restaurant.translate('rush_correct')} '
-              '${_formatMultiplier(multiplier)} / '
-              '${widget.restaurant.translate('rush_mastery')} +1';
+          ? '${widget.restaurant.translate('rush_new_best')} x$nextCombo · $expectedBill'
+          : '${widget.restaurant.translate('rush_correct')} · $expectedBill';
       _lastResultKind = _RushResultKind.success;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: isTerminal ? theme.cyan : theme.accent,
-        content: Text(
-          '${widget.restaurant.translate('rush_correct')} '
-          '+${game.formatCoins(reward)} / '
-          '${widget.restaurant.translate('rush_mastery')} +1',
-          style: TextStyle(
-            color: isTerminal ? Colors.black : theme.ink,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Courier',
-          ),
+    AppMessage.show(
+      context,
+      backgroundColor: feedbackBackground,
+      content: Text(
+        '${widget.restaurant.translate('rush_correct')} · '
+        '${widget.restaurant.translate('rush_expected_bill')} '
+        '+${game.formatCoins(reward)}',
+        style: TextStyle(
+          color: AppTheme.foregroundOn(feedbackBackground),
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Courier',
         ),
-        duration: const Duration(seconds: 1),
       ),
+      duration: const Duration(seconds: 1),
     );
-
-    if (game.shiftReadyToFinish && context.mounted) {
-      final summary = await game.finishShift();
-      if (context.mounted && summary.hasActivity) {
-        setState(() {
-          _combo = 0;
-        });
-        _showShiftSummary(context, summary);
-      }
-    }
   }
 
   void _showShiftSummary(BuildContext context, ShiftSummary summary) {
@@ -277,6 +285,9 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
             if (expired) {
               _queueTimeout(context, game);
             }
+            if (game.shiftReadyToFinish) {
+              _queueShiftSummary(game);
+            }
             final manualCustomer = game.manualDiningCustomer;
             final remaining = game.customerArrivalRemaining(now);
             final waiting = activeFood == null &&
@@ -308,53 +319,77 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
 
   Widget _buildReady(BuildContext context, GameController game) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final actionBackground = isTerminal ? theme.cyan : theme.accent;
+    final actionForeground = AppTheme.foregroundOn(actionBackground);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _PromptLine(
-          icon: Icons.sensor_door,
-          title: widget.restaurant.translate('rush_ready_title'),
-          body: widget.restaurant.translate('rush_ready_body'),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 48,
-          child: ElevatedButton.icon(
-            onPressed: () => _seatCustomer(context, game),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isTerminal ? theme.cyan : theme.accent,
-              foregroundColor: isTerminal ? Colors.black : theme.ink,
-              side: BorderSide(
-                color: isTerminal ? theme.cyan : theme.border,
-                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(
-                  mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _PromptLine(
+                  icon: Icons.sensor_door,
+                  title: widget.restaurant.translate('rush_ready_title'),
+                  body: widget.restaurant.translate('rush_ready_body'),
                 ),
-              ),
-              elevation: 0,
-            ),
-            icon: const Icon(Icons.person_add_alt_1, size: 18),
-            label: Text(
-              widget.restaurant.translate('rush_start'),
-              style: const TextStyle(fontWeight: FontWeight.w900),
+                const SizedBox(height: 14),
+                Semantics(
+                  key: const ValueKey('rush-seat-customer-action'),
+                  button: true,
+                  enabled: true,
+                  label: widget.restaurant.translate('rush_start'),
+                  onTap: () => _seatCustomer(context, game),
+                  excludeSemantics: true,
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _seatCustomer(context, game),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: actionBackground,
+                        foregroundColor: actionForeground,
+                        side: BorderSide(
+                          color: isTerminal ? theme.cyan : theme.border,
+                          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            mode == AppThemeMode.neoBrutalism
+                                ? theme.radius
+                                : 0,
+                          ),
+                        ),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.person_add_alt_1, size: 18),
+                      label: Text(
+                        widget.restaurant.translate('rush_start'),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
   Widget _buildWaiting(BuildContext context, Duration remaining) {
-    return _PromptLine(
-      icon: Icons.hourglass_bottom,
-      title: widget.restaurant.translate('rush_waiting_title'),
-      body:
-          '${widget.restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}',
+    return Center(
+      child: _PromptLine(
+        icon: Icons.hourglass_bottom,
+        title: widget.restaurant.translate('rush_waiting_title'),
+        body:
+            '${widget.restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}',
+      ),
     );
   }
 
@@ -367,18 +402,22 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     final remaining = game.diningCustomerPhaseRemaining(customer, now);
     final body = _manualStatusBody(customer, remaining);
 
-    return _PromptLine(
-      icon: _manualStatusIcon(customer.phase),
-      title: _manualStatusTitle(customer.phase),
-      body: body,
+    return Center(
+      child: _PromptLine(
+        icon: _manualStatusIcon(customer.phase),
+        title: _manualStatusTitle(customer.phase),
+        body: body,
+      ),
     );
   }
 
   Widget _buildTimedOut(BuildContext context) {
-    return _PromptLine(
-      icon: Icons.person_off,
-      title: widget.restaurant.translate('rush_customer_left'),
-      body: widget.restaurant.translate('rush_try_next'),
+    return Center(
+      child: _PromptLine(
+        icon: Icons.person_off,
+        title: widget.restaurant.translate('rush_customer_left'),
+        body: widget.restaurant.translate('rush_try_next'),
+      ),
     );
   }
 
@@ -456,15 +495,17 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
           decoration: BoxDecoration(
             color: theme.surfaceHigh,
             borderRadius: BorderRadius.circular(
-              AppTheme.activeMode == AppThemeMode.neoBrutalism
+              AppTheme.modeOf(context) == AppThemeMode.neoBrutalism
                   ? theme.radius
                   : 0,
             ),
             border: Border.all(
-              color: AppTheme.activeMode == AppThemeMode.neonTerminal
+              color: AppTheme.modeOf(context) == AppThemeMode.neonTerminal
                   ? theme.cyan
                   : theme.border,
-              width: AppTheme.activeMode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+              width: AppTheme.modeOf(context) == AppThemeMode.neoBrutalism
+                  ? 3
+                  : 1.5,
             ),
           ),
           child: Row(
@@ -491,7 +532,7 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      activeFood.name,
+                      widget.restaurant.foodName(activeFood),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -542,27 +583,33 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxHeight < 150;
-              return Column(
-                children: [
-                  for (var index = 0; index < choices.length; index++) ...[
-                    if (index > 0) SizedBox(height: compact ? 6 : 8),
-                    Expanded(
-                      child: _DishChoiceButton(
-                        food: choices[index],
-                        selected: _lastChoiceId == choices[index].id,
-                        correct: _lastChoiceCorrect,
-                        feedbackSeed:
-                            '${_lastChoiceId ?? 0}-${_lastChoiceCorrect ?? false}',
-                        onTap: () => _chooseDish(
-                          context,
-                          game,
-                          choices[index],
-                          activeFood,
+              return SingleChildScrollView(
+                child: Column(
+                  children: [
+                    for (var index = 0; index < choices.length; index++) ...[
+                      if (index > 0) SizedBox(height: compact ? 6 : 8),
+                      SizedBox(
+                        height: 48,
+                        child: _DishChoiceButton(
+                          food: choices[index],
+                          label: widget.restaurant.foodName(choices[index]),
+                          rewardLabel:
+                              '+${game.formatCoins(game.customerOrderRewardForFood(choices[index].id))}',
+                          selected: _lastChoiceId == choices[index].id,
+                          correct: _lastChoiceCorrect,
+                          feedbackSeed:
+                              '${_lastChoiceId ?? 0}-${_lastChoiceCorrect ?? false}',
+                          onTap: () => _chooseDish(
+                            context,
+                            game,
+                            choices[index],
+                            activeFood,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               );
             },
           ),
@@ -586,7 +633,7 @@ class _ShiftSummaryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return Container(
@@ -651,7 +698,8 @@ class _KitchenRushFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isRetro = mode == AppThemeMode.retroOS;
     final borderColor = isTerminal ? theme.cyan : theme.border;
@@ -675,54 +723,36 @@ class _KitchenRushFrame extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(
-                isTerminal ? Icons.terminal : Icons.local_fire_department,
-                color: isTerminal ? theme.cyan : theme.accent,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  restaurant.translate('rush_title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isTerminal ? theme.cyan : theme.ink,
-                    fontFamily: isTerminal ? 'Courier' : null,
-                    fontWeight: FontWeight.w900,
+          Align(
+            key: const ValueKey('rush-status-badges'),
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.end,
+              children: [
+                _RushBadge(
+                  label: '${restaurant.translate('rush_combo')} x$combo',
+                ),
+                if (bestCombo > 0)
+                  _RushBadge(
+                    label: '${restaurant.translate('rush_best')} x$bestCombo',
                   ),
+                _RushBadge(
+                  label: '${restaurant.translate('rush_bonus')} $bonusLabel',
                 ),
-              ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 220),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.end,
-                  children: [
-                    _RushBadge(
-                      label: '${restaurant.translate('rush_combo')} x$combo',
-                    ),
-                    if (bestCombo > 0)
-                      _RushBadge(
-                        label:
-                            '${restaurant.translate('rush_best')} x$bestCombo',
-                      ),
-                    _RushBadge(
-                      label:
-                          '${restaurant.translate('rush_bonus')} $bonusLabel',
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
           if (resultText != null && resultKind != null) ...[
             const SizedBox(height: 8),
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              transitionBuilder: reduceMotion
+                  ? (child, animation) => child
+                  : AnimatedSwitcher.defaultTransitionBuilder,
               child: _ResultBanner(
                 key: ValueKey('$resultText-$resultKind'),
                 text: resultText!,
@@ -751,8 +781,9 @@ class _ResultBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final color = switch (kind) {
       _RushResultKind.success => theme.accent,
       _RushResultKind.miss => theme.danger,
@@ -766,10 +797,14 @@ class _ResultBanner extends StatelessWidget {
 
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.96, end: 1),
-      duration: const Duration(milliseconds: 180),
+      duration:
+          reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
       curve: Curves.easeOutBack,
       builder: (context, scale, child) {
-        return Transform.scale(scale: scale, child: child);
+        return Transform.scale(
+          scale: reduceMotion ? 1 : scale,
+          child: child,
+        );
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -815,7 +850,7 @@ class _RushBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
 
     return Container(
@@ -859,7 +894,7 @@ class _PatienceMeter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -927,13 +962,16 @@ class _PromptLine extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.surfaceHigh,
         borderRadius: BorderRadius.circular(
-          AppTheme.activeMode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+          AppTheme.modeOf(context) == AppThemeMode.neoBrutalism
+              ? theme.radius
+              : 0,
         ),
         border: Border.all(
-          color: AppTheme.activeMode == AppThemeMode.neonTerminal
+          color: AppTheme.modeOf(context) == AppThemeMode.neonTerminal
               ? theme.cyan
               : theme.border,
-          width: AppTheme.activeMode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+          width:
+              AppTheme.modeOf(context) == AppThemeMode.neoBrutalism ? 3 : 1.5,
         ),
       ),
       child: Row(
@@ -976,6 +1014,8 @@ class _PromptLine extends StatelessWidget {
 
 class _DishChoiceButton extends StatelessWidget {
   final Food food;
+  final String label;
+  final String rewardLabel;
   final bool selected;
   final bool? correct;
   final String feedbackSeed;
@@ -983,6 +1023,8 @@ class _DishChoiceButton extends StatelessWidget {
 
   const _DishChoiceButton({
     required this.food,
+    required this.label,
+    required this.rewardLabel,
     required this.selected,
     required this.correct,
     required this.feedbackSeed,
@@ -996,7 +1038,7 @@ class _DishChoiceButton extends StatelessWidget {
     if (food.tags.contains('meat') || food.tags.contains('beef')) {
       return Icons.dinner_dining;
     }
-    if (food.tags.contains('beer')) return Icons.local_drink;
+    if (food.tags.contains('drink')) return Icons.local_drink;
     if (food.tags.contains('bento')) return Icons.rice_bowl;
     if (food.tags.contains('side')) return Icons.eco;
     return Icons.ramen_dining;
@@ -1005,8 +1047,9 @@ class _DishChoiceButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppTheme.of(context);
-    final mode = AppTheme.activeMode;
+    final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final isCorrect = selected && correct == true;
     final isWrong = selected && correct == false;
     final backgroundColor = isCorrect
@@ -1016,89 +1059,105 @@ class _DishChoiceButton extends StatelessWidget {
             : isTerminal
                 ? theme.background.withValues(alpha: 0.35)
                 : theme.surface;
-    final foregroundColor = isCorrect && isTerminal ? Colors.black : theme.ink;
+    final foregroundColor =
+        isCorrect ? AppTheme.foregroundOn(backgroundColor) : theme.ink;
 
-    return TweenAnimationBuilder<double>(
-      key: ValueKey(feedbackSeed),
-      tween: Tween<double>(
-        begin: selected
-            ? isCorrect
-                ? 1.04
-                : 0.96
-            : 1,
-        end: 1,
-      ),
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutBack,
-      builder: (context, scale, child) {
-        return Transform.scale(scale: scale, child: child);
-      },
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(
-          mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+    return Semantics(
+      key: ValueKey('rush-dish-choice-${food.id}'),
+      button: true,
+      enabled: true,
+      selected: selected,
+      label: '$label, $rewardLabel',
+      onTap: onTap,
+      excludeSemantics: true,
+      child: TweenAnimationBuilder<double>(
+        key: ValueKey(feedbackSeed),
+        tween: Tween<double>(
+          begin: selected
+              ? isCorrect
+                  ? 1.04
+                  : 0.96
+              : 1,
+          end: 1,
         ),
-        child: InkWell(
-          onTap: onTap,
+        duration:
+            reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+        curve: Curves.easeOutBack,
+        builder: (context, scale, child) {
+          return Transform.scale(
+            scale: reduceMotion ? 1 : scale,
+            child: child,
+          );
+        },
+        child: Material(
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(
             mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
           ),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(
-                mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
-              ),
-              border: Border.all(
-                color: isWrong
-                    ? theme.danger
-                    : isCorrect
-                        ? theme.accent
-                        : isTerminal
-                            ? theme.cyan
-                            : theme.border,
-                width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
-              ),
-              boxShadow: selected && mode == AppThemeMode.neoBrutalism
-                  ? theme.hardShadow(offset: const Offset(3, 3))
-                  : null,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(
+              mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
             ),
-            child: Row(
-              children: [
-                Icon(_foodIcon, color: foregroundColor, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    food.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: foregroundColor,
-                      fontWeight: FontWeight.w900,
+            child: AnimatedContainer(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(
+                  mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                ),
+                border: Border.all(
+                  color: isWrong
+                      ? theme.danger
+                      : isCorrect
+                          ? theme.accent
+                          : isTerminal
+                              ? theme.cyan
+                              : theme.border,
+                  width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                ),
+                boxShadow: selected && mode == AppThemeMode.neoBrutalism
+                    ? theme.hardShadow(offset: const Offset(3, 3))
+                    : null,
+              ),
+              child: Row(
+                children: [
+                  Icon(_foodIcon, color: foregroundColor, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foregroundColor,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '¥${food.price}',
-                  style: TextStyle(
-                    color: foregroundColor.withValues(alpha: 0.75),
-                    fontWeight: FontWeight.w900,
-                    fontFamily: 'Courier',
-                    fontSize: 12,
-                  ),
-                ),
-                if (selected) ...[
                   const SizedBox(width: 8),
-                  Icon(
-                    isCorrect ? Icons.check_circle : Icons.cancel,
-                    color: isCorrect ? theme.accent : theme.danger,
-                    size: 17,
+                  Text(
+                    rewardLabel,
+                    style: TextStyle(
+                      color: foregroundColor.withValues(alpha: 0.75),
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Courier',
+                      fontSize: 12,
+                    ),
                   ),
+                  if (selected) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      isCorrect ? Icons.check_circle : Icons.cancel,
+                      color: isCorrect ? theme.accent : theme.danger,
+                      size: 17,
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

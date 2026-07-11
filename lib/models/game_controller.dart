@@ -1,373 +1,23 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:cyber_table_order/models/food_catalog.dart';
+import 'package:cyber_table_order/models/game_balance.dart';
+import 'package:cyber_table_order/models/game_models.dart';
+import 'package:cyber_table_order/models/game_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-abstract class GameStorage {
-  Future<double?> getDouble(String key);
-  Future<int?> getInt(String key);
-  Future<String?> getString(String key);
-  Future<void> setDouble(String key, double value);
-  Future<void> setInt(String key, int value);
-  Future<void> setString(String key, String value);
-  Future<void> remove(String key);
-  Future<void> clearGameData();
-}
-
-class SharedPreferencesGameStorage implements GameStorage {
-  static const _gameKeys = [
-    GameController._coinsKey,
-    GameController._lifetimeEarningsKey,
-    GameController._lastSavedAtKey,
-    GameController._lastOrderRewardAtKey,
-    GameController._customerOrderFoodIdKey,
-    GameController._customerOrderRewardKey,
-    GameController._customerOrderCreatedAtKey,
-    GameController._nextCustomerAvailableAtKey,
-    GameController._customerOrdersServedKey,
-    GameController._bestComboKey,
-    GameController._claimedMilestoneIdsKey,
-    GameController._seatLevelKey,
-    GameController._serviceLevelKey,
-    GameController._kitchenLevelKey,
-    GameController._menuUpgradeLevelsKey,
-    GameController._menuMasteryXpKey,
-    GameController._menuServeCountsKey,
-    GameController._restaurantXpKey,
-    GameController._unlockedFoodIdsKey,
-    GameController._shiftOrdersServedKey,
-    GameController._shiftMissedOrdersKey,
-    GameController._shiftBestComboKey,
-    GameController._shiftCoinsEarnedKey,
-    GameController._dailyTaskDateKey,
-    GameController._dailyOrdersServedKey,
-    GameController._dailyBestComboKey,
-    GameController._dailyUpgradesKey,
-    GameController._claimedDailyTaskIdsKey,
-    GameController._activeCustomerTypeKey,
-    GameController._pendingBusinessEarningsKey,
-    GameController._diningCustomersKey,
-    GameController._nextDiningCustomerIdKey,
-    GameController._businessQueueCountKey,
-    GameController._businessSeatedCountKey,
-    GameController._businessKitchenQueueCountKey,
-    GameController._businessEatingCountKey,
-    GameController._businessCheckoutQueueCountKey,
-  ];
-
-  Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
-
-  @override
-  Future<double?> getDouble(String key) async {
-    return (await _prefs).getDouble(key);
-  }
-
-  @override
-  Future<int?> getInt(String key) async {
-    return (await _prefs).getInt(key);
-  }
-
-  @override
-  Future<String?> getString(String key) async {
-    return (await _prefs).getString(key);
-  }
-
-  @override
-  Future<void> setDouble(String key, double value) async {
-    await (await _prefs).setDouble(key, value);
-  }
-
-  @override
-  Future<void> setInt(String key, int value) async {
-    await (await _prefs).setInt(key, value);
-  }
-
-  @override
-  Future<void> setString(String key, String value) async {
-    await (await _prefs).setString(key, value);
-  }
-
-  @override
-  Future<void> remove(String key) async {
-    await (await _prefs).remove(key);
-  }
-
-  @override
-  Future<void> clearGameData() async {
-    final prefs = await _prefs;
-    for (final key in _gameKeys) {
-      await prefs.remove(key);
-    }
-  }
-}
-
-class MemoryGameStorage implements GameStorage {
-  final Map<String, Object> _values;
-
-  MemoryGameStorage([Map<String, Object>? values]) : _values = values ?? {};
-
-  @override
-  Future<double?> getDouble(String key) async {
-    final value = _values[key];
-    return value is double ? value : null;
-  }
-
-  @override
-  Future<int?> getInt(String key) async {
-    final value = _values[key];
-    return value is int ? value : null;
-  }
-
-  @override
-  Future<String?> getString(String key) async {
-    final value = _values[key];
-    return value is String ? value : null;
-  }
-
-  @override
-  Future<void> setDouble(String key, double value) async {
-    _values[key] = value;
-  }
-
-  @override
-  Future<void> setInt(String key, int value) async {
-    _values[key] = value;
-  }
-
-  @override
-  Future<void> setString(String key, String value) async {
-    _values[key] = value;
-  }
-
-  @override
-  Future<void> remove(String key) async {
-    _values.remove(key);
-  }
-
-  @override
-  Future<void> clearGameData() async {
-    _values.clear();
-  }
-}
-
-class GameMilestone {
-  final String id;
-  final String titleKey;
-  final String descriptionKey;
-  final int progress;
-  final int target;
-  final double reward;
-  final bool claimed;
-
-  const GameMilestone({
-    required this.id,
-    required this.titleKey,
-    required this.descriptionKey,
-    required this.progress,
-    required this.target,
-    required this.reward,
-    required this.claimed,
-  });
-
-  bool get completed => progress >= target;
-  bool get claimable => completed && !claimed;
-  double get progressRatio {
-    if (target <= 0) return 1;
-    return (progress / target).clamp(0, 1).toDouble();
-  }
-}
-
-enum GameCustomerType { normal, impatient, vip }
-
-enum GameEventType { lunchRush, regularVisit, ingredientDiscount }
-
-enum GameDiningCustomerSource { auto, manual }
-
-enum GameDiningCustomerPhase {
-  queueing,
-  seating,
-  waitingForFood,
-  servingFood,
-  eating,
-  checkout,
-  leaving,
-}
-
-class GameDiningCustomer {
-  final int id;
-  final GameDiningCustomerSource source;
-  final GameDiningCustomerPhase phase;
-  final int? seatIndex;
-  final int? foodId;
-  final double reward;
-  final GameCustomerType customerType;
-  final DateTime phaseStartedAt;
-  final int combo;
-
-  const GameDiningCustomer({
-    required this.id,
-    required this.source,
-    required this.phase,
-    required this.seatIndex,
-    required this.foodId,
-    required this.reward,
-    required this.customerType,
-    required this.phaseStartedAt,
-    this.combo = 0,
-  });
-
-  bool get isManual => source == GameDiningCustomerSource.manual;
-  bool get isAuto => source == GameDiningCustomerSource.auto;
-  bool get hasSeat => seatIndex != null;
-  bool get isWaitingForManualDish =>
-      isManual && phase == GameDiningCustomerPhase.waitingForFood;
-
-  GameDiningCustomer copyWith({
-    GameDiningCustomerSource? source,
-    GameDiningCustomerPhase? phase,
-    Object? seatIndex = _copySentinel,
-    Object? foodId = _copySentinel,
-    double? reward,
-    GameCustomerType? customerType,
-    DateTime? phaseStartedAt,
-    int? combo,
-  }) {
-    return GameDiningCustomer(
-      id: id,
-      source: source ?? this.source,
-      phase: phase ?? this.phase,
-      seatIndex: identical(seatIndex, _copySentinel)
-          ? this.seatIndex
-          : seatIndex as int?,
-      foodId: identical(foodId, _copySentinel) ? this.foodId : foodId as int?,
-      reward: reward ?? this.reward,
-      customerType: customerType ?? this.customerType,
-      phaseStartedAt: phaseStartedAt ?? this.phaseStartedAt,
-      combo: combo ?? this.combo,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'source': source.name,
-      'phase': phase.name,
-      'seatIndex': seatIndex,
-      'foodId': foodId,
-      'reward': reward,
-      'customerType': customerType.name,
-      'phaseStartedAt': phaseStartedAt.toIso8601String(),
-      'combo': combo,
-    };
-  }
-
-  static GameDiningCustomer? fromJson(Map<String, dynamic> json) {
-    final id = _readInt(json['id']);
-    if (id == null || id <= 0) return null;
-    final phaseStartedAt = DateTime.tryParse('${json['phaseStartedAt']}');
-    if (phaseStartedAt == null) return null;
-
-    return GameDiningCustomer(
-      id: id,
-      source: _decodeSource(json['source']),
-      phase: _decodePhase(json['phase']),
-      seatIndex: _readInt(json['seatIndex']),
-      foodId: _readInt(json['foodId']),
-      reward: _readDouble(json['reward']) ?? 0,
-      customerType: _decodeCustomerType(json['customerType']),
-      phaseStartedAt: phaseStartedAt,
-      combo: max(0, _readInt(json['combo']) ?? 0),
-    );
-  }
-
-  static int? _readInt(Object? value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
-
-  static double? _readDouble(Object? value) {
-    if (value is double) return value;
-    if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value);
-    return null;
-  }
-
-  static GameDiningCustomerSource _decodeSource(Object? value) {
-    for (final source in GameDiningCustomerSource.values) {
-      if (source.name == value) return source;
-    }
-    return GameDiningCustomerSource.auto;
-  }
-
-  static GameDiningCustomerPhase _decodePhase(Object? value) {
-    for (final phase in GameDiningCustomerPhase.values) {
-      if (phase.name == value) return phase;
-    }
-    return GameDiningCustomerPhase.queueing;
-  }
-
-  static GameCustomerType _decodeCustomerType(Object? value) {
-    for (final type in GameCustomerType.values) {
-      if (type.name == value) return type;
-    }
-    return GameCustomerType.normal;
-  }
-}
-
-const Object _copySentinel = Object();
-
-class GameDailyTask {
-  final String id;
-  final String titleKey;
-  final String descriptionKey;
-  final int progress;
-  final int target;
-  final double reward;
-  final bool claimed;
-
-  const GameDailyTask({
-    required this.id,
-    required this.titleKey,
-    required this.descriptionKey,
-    required this.progress,
-    required this.target,
-    required this.reward,
-    required this.claimed,
-  });
-
-  bool get completed => progress >= target;
-  bool get claimable => completed && !claimed;
-  double get progressRatio {
-    if (target <= 0) return 1;
-    return (progress / target).clamp(0, 1).toDouble();
-  }
-}
-
-class ShiftSummary {
-  final int ordersServed;
-  final int missedOrders;
-  final int bestCombo;
-  final double coinsEarned;
-
-  const ShiftSummary({
-    required this.ordersServed,
-    required this.missedOrders,
-    required this.bestCombo,
-    required this.coinsEarned,
-  });
-
-  bool get hasActivity =>
-      ordersServed > 0 || missedOrders > 0 || coinsEarned > 0;
-}
+export 'package:cyber_table_order/models/game_balance.dart';
+export 'package:cyber_table_order/models/game_models.dart';
+export 'package:cyber_table_order/models/game_storage.dart';
 
 class GameController extends ChangeNotifier {
+  static const _snapshotKey = 'idle_game_snapshot_v2';
+  static const _snapshotVersion = 2;
   static const _coinsKey = 'idle_coins';
   static const _lifetimeEarningsKey = 'idle_lifetime_earnings';
+  static const _pendingOfflineEarningsKey = 'idle_pending_offline_earnings';
   static const _lastSavedAtKey = 'idle_last_saved_at';
-  static const _lastOrderRewardAtKey = 'idle_last_order_reward_at';
   static const _customerOrderFoodIdKey = 'idle_customer_order_food_id';
   static const _customerOrderRewardKey = 'idle_customer_order_reward';
   static const _customerOrderCreatedAtKey = 'idle_customer_order_created_at';
@@ -401,27 +51,32 @@ class GameController extends ChangeNotifier {
   static const _businessKitchenQueueCountKey = 'idle_business_kitchen_queue';
   static const _businessEatingCountKey = 'idle_business_eating_count';
   static const _businessCheckoutQueueCountKey = 'idle_business_checkout_queue';
+  static const _arrivalCarryKey = 'idle_arrival_carry';
+  static const _kitchenCarryKey = 'idle_kitchen_carry';
+  static const _serviceCarryKey = 'idle_service_carry';
 
   static const startingCoins = 120.0;
-  static const maxOfflineMinutes = 480;
+  static const maxOfflineMinutes = GameBalance.maxOfflineMinutes;
   static const shiftTargetOrders = 4;
   static const restaurantXpPerLevel = 100;
-  static const manualOrderRewardCoins = 5.0;
-  static const manualOrderRewardCooldown = Duration(seconds: 30);
   static const customerOrderBaseReward = 18.0;
   static const customerArrivalBaseSeconds = 12;
   static const customerArrivalMinSeconds = 4;
   static const customerPatienceBaseSeconds = 18;
   static const customerPatienceMaxSeconds = 30;
-  static const businessMealBaseSeconds = 14;
-  static const businessMealMinSeconds = 8;
-  static const customerSeatingDuration = Duration(seconds: 2);
-  static const foodServingDuration = Duration(seconds: 2);
-  static const customerLeavingDuration = Duration(seconds: 2);
+  static const businessMealBaseSeconds = GameBalance.businessMealBaseSeconds;
+  static const businessMealMinSeconds = GameBalance.businessMealMinSeconds;
+  static const customerSeatingDuration = Duration(
+    seconds: GameBalance.customerSeatingSeconds,
+  );
+  static const foodServingDuration = Duration(
+    seconds: GameBalance.foodServingSeconds,
+  );
+  static const customerLeavingDuration = Duration(
+    seconds: GameBalance.customerLeavingSeconds,
+  );
   static const menuMasteryXpPerLevel = 4;
   static const maxBusinessTickSeconds = 120;
-  static const _knownFoodIds = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-  static const _defaultUnlockedFoodIds = {1, 2, 3, 4, 5};
 
   final GameStorage storage;
 
@@ -429,7 +84,6 @@ class GameController extends ChangeNotifier {
   double _lifetimeEarnings = 0;
   double _pendingOfflineEarnings = 0;
   DateTime _lastSavedAt = DateTime.now();
-  DateTime? _lastOrderRewardAt;
   int? _customerOrderFoodId;
   double _customerOrderReward = 0;
   DateTime? _customerOrderCreatedAt;
@@ -463,10 +117,12 @@ class GameController extends ChangeNotifier {
   Map<int, int> _menuUpgradeLevels = {};
   Map<int, int> _menuMasteryXp = {};
   Map<int, int> _menuServeCounts = {};
-  Set<int> _unlockedFoodIds = {..._defaultUnlockedFoodIds};
+  Set<int> _unlockedFoodIds = {...FoodCatalog.defaultUnlockedIds};
   Set<String> _claimedMilestoneIds = {};
   Set<String> _claimedDailyTaskIds = {};
   List<GameDiningCustomer> _diningCustomers = [];
+  Future<void> _saveQueue = Future<void>.value();
+  Object? _lastSaveError;
 
   GameController({GameStorage? storage})
       : storage = storage ?? SharedPreferencesGameStorage();
@@ -478,7 +134,6 @@ class GameController extends ChangeNotifier {
   double get pendingClaimableEarnings =>
       _pendingOfflineEarnings + _pendingBusinessEarnings;
   DateTime get lastSavedAt => _lastSavedAt;
-  DateTime? get lastOrderRewardAt => _lastOrderRewardAt;
   int? get customerOrderFoodId {
     final customer = _manualWaitingCustomer;
     return customer?.foodId ?? _customerOrderFoodId;
@@ -543,7 +198,7 @@ class GameController extends ChangeNotifier {
   int get businessCheckoutQueueCount => _autoCustomers
       .where((customer) => customer.phase == GameDiningCustomerPhase.checkout)
       .length;
-  int get diningCapacity => max(2, _seatLevel + 1);
+  int get diningCapacity => GameBalance.diningCapacity(_seatLevel);
   int get businessMaxQueue => max(4, diningCapacity * 2);
   double get businessLoadRatio {
     if (diningCapacity <= 0) return 0;
@@ -565,51 +220,164 @@ class GameController extends ChangeNotifier {
   bool get hasBusinessActivity =>
       _autoCustomers.isNotEmpty || _pendingBusinessEarnings > 0;
 
-  double get customerArrivalRatePerMinute {
-    final eventMultiplier =
-        activeEventType == GameEventType.lunchRush ? 1.3 : 1;
-    return (10 + restaurantLevel * 1.2 + _seatLevel) * eventMultiplier;
-  }
+  double get _arrivalEventMultiplier =>
+      activeEventType == GameEventType.lunchRush ? 1.3 : 1;
 
-  double get kitchenOrdersPerMinute => 8 + _kitchenLevel * 1.4;
+  double get customerArrivalRatePerMinute =>
+      GameBalance.customerArrivalRatePerMinute(
+        seatLevel: _seatLevel,
+        restaurantLevel: restaurantLevel,
+        eventMultiplier: _arrivalEventMultiplier,
+      );
 
-  Duration get businessMealDuration {
-    final seconds =
-        businessMealBaseSeconds - (_seatLevel - 1) - (_serviceLevel - 1);
-    return Duration(seconds: max(businessMealMinSeconds, seconds));
-  }
+  double get kitchenOrdersPerMinute =>
+      GameBalance.kitchenOrdersPerMinute(_kitchenLevel);
 
-  double get mealOrdersPerMinute => 60 / businessMealDuration.inSeconds;
+  Duration get businessMealDuration => GameBalance.businessMealDuration(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+      );
 
-  double get serviceOrdersPerMinute => 8 + _serviceLevel * 1.4;
+  double get mealOrdersPerMinute => GameBalance.seatTurnoverOrdersPerMinute(
+        diningCapacity: diningCapacity,
+        mealDuration: businessMealDuration,
+        kitchenRatePerMinute: kitchenOrdersPerMinute,
+        checkoutRatePerMinute: serviceOrdersPerMinute,
+      );
+
+  double get serviceOrdersPerMinute =>
+      GameBalance.checkoutOrdersPerMinute(_serviceLevel);
 
   Duration get _checkoutDuration {
     final seconds = 8 - _serviceLevel;
     return Duration(seconds: max(2, seconds));
   }
 
-  double get autoOrdersPerMinute {
-    return min(
-      customerArrivalRatePerMinute,
-      min(
-        kitchenOrdersPerMinute,
-        min(mealOrdersPerMinute, serviceOrdersPerMinute),
+  double get autoOrdersPerMinute => GameBalance.autoOrdersPerMinute(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        restaurantLevel: restaurantLevel,
+        arrivalEventMultiplier: _arrivalEventMultiplier,
+      );
+
+  double get baselineAutoOrdersPerMinute => GameBalance.autoOrdersPerMinute(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        restaurantLevel: restaurantLevel,
+      );
+
+  double get averageAutoOrderReward => _averageAutoOrderRewardFor(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        projectedRestaurantLevel: restaurantLevel,
+      );
+
+  double get baselineAverageAutoOrderReward => _averageAutoOrderRewardFor(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        projectedRestaurantLevel: restaurantLevel,
+        rewardMultiplier: 1,
+      );
+
+  double get autoRevenuePerMinute =>
+      autoOrdersPerMinute * averageAutoOrderReward;
+
+  double get baselineRevenuePerMinute =>
+      baselineAutoOrdersPerMinute * baselineAverageAutoOrderReward;
+
+  int get offlineMinuteCap => GameBalance.offlineMinuteCap(restaurantLevel);
+  double get offlineEfficiency =>
+      GameBalance.offlineEfficiency(restaurantLevel);
+
+  GameBusinessDiagnosis get businessDiagnosis {
+    final bottleneck = _diagnoseBusinessBottleneck();
+    final limitingRate = switch (bottleneck) {
+      GameBusinessBottleneck.kitchen => kitchenOrdersPerMinute,
+      GameBusinessBottleneck.dining => mealOrdersPerMinute,
+      GameBusinessBottleneck.checkout => serviceOrdersPerMinute,
+      GameBusinessBottleneck.seats ||
+      GameBusinessBottleneck.balanced =>
+        autoOrdersPerMinute,
+    };
+    return GameBusinessDiagnosis(
+      bottleneck: bottleneck,
+      arrivalRatePerMinute: customerArrivalRatePerMinute,
+      kitchenRatePerMinute: kitchenOrdersPerMinute,
+      diningRatePerMinute: mealOrdersPerMinute,
+      checkoutRatePerMinute: serviceOrdersPerMinute,
+      estimatedOrdersPerMinute: autoOrdersPerMinute,
+      limitingRatePerMinute: limitingRate,
+      queueCount: businessQueueCount,
+      occupiedSeats: businessSeatedCount,
+      seatCapacity: diningCapacity,
+      kitchenQueueCount: businessKitchenQueueCount,
+      eatingCount: businessEatingCount,
+      checkoutQueueCount: businessCheckoutQueueCount,
+    );
+  }
+
+  GameBusinessBottleneck get businessBottleneck => businessDiagnosis.bottleneck;
+
+  List<GameOperationUpgradePreview> get operationUpgradePreviews {
+    final previews = GameOperationUpgradeType.values
+        .map(_buildOperationUpgradePreview)
+        .toList(growable: false);
+    final candidates = GameOperationUpgradeType.values
+        .map(
+          (type) => _buildOperationUpgradePreview(
+            type,
+            applyEventDiscount: false,
+          ),
+        )
+        .where((preview) => preview.coinsPerMinuteGain > 0)
+        .toList();
+    candidates.sort((left, right) {
+      final payback = left.paybackMinutes!.compareTo(right.paybackMinutes!);
+      if (payback != 0) return payback;
+      final gain = right.coinsPerMinuteGain.compareTo(
+        left.coinsPerMinuteGain,
+      );
+      if (gain != 0) return gain;
+      final cost = left.cost.compareTo(right.cost);
+      if (cost != 0) return cost;
+      return left.type.index.compareTo(right.type.index);
+    });
+    GameOperationUpgradeType? recommendedType;
+    if (candidates.isNotEmpty) {
+      recommendedType = candidates.first.type;
+    }
+    return List.unmodifiable(
+      previews.map(
+        (preview) => preview.copyWith(
+          isRecommended: preview.type == recommendedType,
+        ),
       ),
     );
   }
 
-  double get averageAutoOrderReward {
-    final ids = _computedUnlockedFoodIds().toList()..sort();
-    if (ids.isEmpty) return customerOrderBaseReward;
-    final total = ids.fold<double>(
-      0,
-      (sum, foodId) => sum + customerOrderRewardForFood(foodId),
+  GameOperationUpgradePreview previewOperationUpgrade(
+    GameOperationUpgradeType type,
+  ) {
+    return operationUpgradePreviews.firstWhere(
+      (preview) => preview.type == type,
     );
-    return (total / ids.length) * activeEventRewardMultiplier;
   }
 
-  double get autoRevenuePerMinute =>
-      autoOrdersPerMinute * averageAutoOrderReward;
+  GameOperationUpgradeType? get recommendedOperationUpgradeType {
+    return recommendedOperationUpgradePreview?.type;
+  }
+
+  GameOperationUpgradePreview? get recommendedOperationUpgradePreview {
+    for (final preview in operationUpgradePreviews) {
+      if (preview.isRecommended) return preview;
+    }
+    return null;
+  }
+
   GameCustomerType get activeCustomerType => _activeCustomerType;
   GameEventType? get activeEventType {
     if (_customerOrdersServed < 4) return null;
@@ -661,6 +429,7 @@ class GameController extends ChangeNotifier {
   }
 
   bool get isLoaded => _isLoaded;
+  bool get hasSaveError => _lastSaveError != null;
   Map<int, int> get menuUpgradeLevels => Map.unmodifiable(_menuUpgradeLevels);
   Map<int, int> get menuMasteryXpByFood => Map.unmodifiable(_menuMasteryXp);
   Map<int, int> get menuServeCountsByFood => Map.unmodifiable(_menuServeCounts);
@@ -700,16 +469,16 @@ class GameController extends ChangeNotifier {
         id: 'better_seats',
         titleKey: 'idle_goal_better_seats_title',
         descriptionKey: 'idle_goal_better_seats_desc',
-        progress: _seatLevel,
-        target: 2,
+        progress: max(0, _seatLevel - 1),
+        target: 1,
         reward: 80,
       ),
       _milestone(
         id: 'quick_service',
         titleKey: 'idle_goal_quick_service_title',
         descriptionKey: 'idle_goal_quick_service_desc',
-        progress: _serviceLevel,
-        target: 2,
+        progress: max(0, _serviceLevel - 1),
+        target: 1,
         reward: 80,
       ),
       _milestone(
@@ -724,8 +493,8 @@ class GameController extends ChangeNotifier {
         id: 'shop_level_two',
         titleKey: 'idle_goal_shop_level_two_title',
         descriptionKey: 'idle_goal_shop_level_two_desc',
-        progress: restaurantLevel,
-        target: 2,
+        progress: max(0, restaurantLevel - 1),
+        target: 1,
         reward: 180,
       ),
     ];
@@ -770,23 +539,31 @@ class GameController extends ChangeNotifier {
       claimableMilestoneCount + claimableDailyTaskCount;
 
   GameMilestone? get nextMilestone {
-    for (final milestone in milestones) {
-      if (!milestone.claimed) return milestone;
+    final remaining = milestones
+        .where((milestone) => !milestone.claimed)
+        .toList(growable: false);
+    for (final milestone in remaining) {
+      if (milestone.claimable) return milestone;
     }
-    return null;
+    GameMilestone? closest;
+    for (final milestone in remaining) {
+      if (closest == null || milestone.progressRatio > closest.progressRatio) {
+        closest = milestone;
+      }
+    }
+    return closest;
   }
 
-  int get restaurantLevel {
-    final totalMenuLevels =
-        _menuUpgradeLevels.values.fold<int>(0, (sum, level) => sum + level);
-    final upgradeLevel = 1 +
-        ((_seatLevel - 1) +
-                (_serviceLevel - 1) +
-                (_kitchenLevel - 1) +
-                totalMenuLevels) ~/
-            5;
-    return max(upgradeLevel, restaurantXpLevel);
-  }
+  int get _totalMenuUpgradeLevels =>
+      _menuUpgradeLevels.values.fold<int>(0, (sum, level) => sum + level);
+
+  int get restaurantLevel => GameBalance.restaurantLevel(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        totalMenuLevels: _totalMenuUpgradeLevels,
+        restaurantXpLevel: restaurantXpLevel,
+      );
 
   double get revenuePerMinute {
     return autoRevenuePerMinute;
@@ -814,34 +591,215 @@ class GameController extends ChangeNotifier {
 
   double menuUpgradeCost(int foodId) {
     final level = menuLevel(foodId);
-    return (60 + level * 40) * activeEventUpgradeCostMultiplier;
+    return GameBalance.menuUpgradeCost(
+      level,
+      eventMultiplier: activeEventUpgradeCostMultiplier,
+    );
   }
 
-  double get seatUpgradeCost =>
-      (100 + (_seatLevel - 1) * 75) * activeEventUpgradeCostMultiplier;
+  double get seatUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 100,
+        currentLevel: _seatLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
-  double get serviceUpgradeCost =>
-      (90 + (_serviceLevel - 1) * 70) * activeEventUpgradeCostMultiplier;
+  double get serviceUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 90,
+        currentLevel: _serviceLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
-  double get kitchenUpgradeCost =>
-      (110 + (_kitchenLevel - 1) * 80) * activeEventUpgradeCostMultiplier;
+  double get kitchenUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 110,
+        currentLevel: _kitchenLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
-  String formatCoins(double value) => value.round().toString();
+  String formatCoins(double value) => formatCompactCoins(value);
+
+  String formatCompactCoins(double value) =>
+      GameBalance.formatCompactNumber(value);
 
   double customerOrderRewardForFood(int foodId) {
-    return customerOrderBaseReward +
-        restaurantLevel * 4 +
-        _seatLevel * 2 +
-        _serviceLevel * 2 +
-        _kitchenLevel * 3 +
+    return _customerOrderRewardForFoodAtLevels(
+      foodId,
+      seatLevel: _seatLevel,
+      serviceLevel: _serviceLevel,
+      kitchenLevel: _kitchenLevel,
+      projectedRestaurantLevel: restaurantLevel,
+    );
+  }
+
+  GameBusinessBottleneck _diagnoseBusinessBottleneck() {
+    if (_autoCustomers.isEmpty) return GameBusinessBottleneck.balanced;
+
+    if (businessQueueCount > 0 && businessSeatedCount >= diningCapacity) {
+      return GameBusinessBottleneck.seats;
+    }
+
+    final capacity = max(1, diningCapacity);
+    final kitchenPressure = businessKitchenQueueCount / capacity;
+    final diningPressure = businessEatingCount / capacity;
+    final checkoutPressure = businessCheckoutQueueCount / capacity;
+
+    if (businessKitchenQueueCount > 0 &&
+        kitchenPressure >= diningPressure &&
+        kitchenPressure >= checkoutPressure) {
+      return GameBusinessBottleneck.kitchen;
+    }
+    if (businessCheckoutQueueCount > 0 &&
+        checkoutPressure >= kitchenPressure &&
+        checkoutPressure >= diningPressure) {
+      return GameBusinessBottleneck.checkout;
+    }
+    if (businessEatingCount > 0 &&
+        diningPressure >= kitchenPressure &&
+        diningPressure >= checkoutPressure) {
+      return GameBusinessBottleneck.dining;
+    }
+
+    if (businessSeatedCount <= 0) return GameBusinessBottleneck.balanced;
+    final processingRate = min(
+      kitchenOrdersPerMinute,
+      min(mealOrdersPerMinute, serviceOrdersPerMinute),
+    );
+    if (customerArrivalRatePerMinute <= processingRate * 1.05) {
+      return GameBusinessBottleneck.balanced;
+    }
+    if (kitchenOrdersPerMinute <= mealOrdersPerMinute &&
+        kitchenOrdersPerMinute <= serviceOrdersPerMinute) {
+      return GameBusinessBottleneck.kitchen;
+    }
+    if (serviceOrdersPerMinute <= kitchenOrdersPerMinute &&
+        serviceOrdersPerMinute <= mealOrdersPerMinute) {
+      return GameBusinessBottleneck.checkout;
+    }
+    return GameBusinessBottleneck.dining;
+  }
+
+  GameOperationUpgradePreview _buildOperationUpgradePreview(
+    GameOperationUpgradeType type, {
+    bool applyEventDiscount = true,
+  }) {
+    var projectedSeatLevel = _seatLevel;
+    var projectedServiceLevel = _serviceLevel;
+    var projectedKitchenLevel = _kitchenLevel;
+    final currentLevel = switch (type) {
+      GameOperationUpgradeType.seats => _seatLevel,
+      GameOperationUpgradeType.kitchen => _kitchenLevel,
+      GameOperationUpgradeType.service => _serviceLevel,
+    };
+    final eventMultiplier =
+        applyEventDiscount ? activeEventUpgradeCostMultiplier : 1.0;
+    final cost = switch (type) {
+      GameOperationUpgradeType.seats => GameBalance.operationUpgradeCost(
+          baseCost: 100,
+          currentLevel: _seatLevel,
+          eventMultiplier: eventMultiplier,
+        ),
+      GameOperationUpgradeType.kitchen => GameBalance.operationUpgradeCost(
+          baseCost: 110,
+          currentLevel: _kitchenLevel,
+          eventMultiplier: eventMultiplier,
+        ),
+      GameOperationUpgradeType.service => GameBalance.operationUpgradeCost(
+          baseCost: 90,
+          currentLevel: _serviceLevel,
+          eventMultiplier: eventMultiplier,
+        ),
+    };
+    switch (type) {
+      case GameOperationUpgradeType.seats:
+        projectedSeatLevel += 1;
+      case GameOperationUpgradeType.kitchen:
+        projectedKitchenLevel += 1;
+      case GameOperationUpgradeType.service:
+        projectedServiceLevel += 1;
+    }
+
+    final projectedRestaurantLevel = GameBalance.restaurantLevel(
+      seatLevel: projectedSeatLevel,
+      serviceLevel: projectedServiceLevel,
+      kitchenLevel: projectedKitchenLevel,
+      totalMenuLevels: _totalMenuUpgradeLevels,
+      restaurantXpLevel: restaurantXpLevel,
+    );
+    final projectedOrdersPerMinute = GameBalance.autoOrdersPerMinute(
+      seatLevel: projectedSeatLevel,
+      serviceLevel: projectedServiceLevel,
+      kitchenLevel: projectedKitchenLevel,
+      restaurantLevel: projectedRestaurantLevel,
+    );
+    final projectedReward = _averageAutoOrderRewardFor(
+      seatLevel: projectedSeatLevel,
+      serviceLevel: projectedServiceLevel,
+      kitchenLevel: projectedKitchenLevel,
+      projectedRestaurantLevel: projectedRestaurantLevel,
+      rewardMultiplier: 1,
+    );
+    final projectedCoinsPerMinute = projectedOrdersPerMinute * projectedReward;
+    return GameOperationUpgradePreview(
+      type: type,
+      currentLevel: currentLevel,
+      upgradedLevel: currentLevel + 1,
+      currentOrdersPerMinute: baselineAutoOrdersPerMinute,
+      upgradedOrdersPerMinute: projectedOrdersPerMinute,
+      currentCoinsPerMinute: baselineRevenuePerMinute,
+      upgradedCoinsPerMinute: projectedCoinsPerMinute,
+      coinsPerMinuteGain: projectedCoinsPerMinute - baselineRevenuePerMinute,
+      cost: cost,
+      canAfford: _coins >= cost,
+      isRecommended: false,
+    );
+  }
+
+  double _averageAutoOrderRewardFor({
+    required int seatLevel,
+    required int serviceLevel,
+    required int kitchenLevel,
+    required int projectedRestaurantLevel,
+    double? rewardMultiplier,
+  }) {
+    final ids = _computedUnlockedFoodIdsFor(projectedRestaurantLevel).toList()
+      ..sort();
+    if (ids.isEmpty) return customerOrderBaseReward;
+    final total = ids.fold<double>(
+      0,
+      (sum, foodId) =>
+          sum +
+          _customerOrderRewardForFoodAtLevels(
+            foodId,
+            seatLevel: seatLevel,
+            serviceLevel: serviceLevel,
+            kitchenLevel: kitchenLevel,
+            projectedRestaurantLevel: projectedRestaurantLevel,
+          ),
+    );
+    return (total / ids.length) *
+        (rewardMultiplier ?? activeEventRewardMultiplier);
+  }
+
+  double _customerOrderRewardForFoodAtLevels(
+    int foodId, {
+    required int seatLevel,
+    required int serviceLevel,
+    required int kitchenLevel,
+    required int projectedRestaurantLevel,
+  }) {
+    final baseReward =
+        FoodCatalog.findById(foodId)?.baseRewardCoins.toDouble() ??
+            customerOrderBaseReward;
+    return baseReward +
+        projectedRestaurantLevel * 4 +
+        seatLevel * 2 +
+        serviceLevel * 2 +
+        kitchenLevel * 3 +
         menuLevel(foodId) * 5 +
         masteryLevelForFood(foodId) * 2;
   }
 
   int foodUnlockLevel(int foodId) {
-    if (foodId <= 5) return 1;
-    if (foodId <= 9) return foodId - 4;
-    return 99;
+    return FoodCatalog.findById(foodId)?.unlockLevel ?? 99;
   }
 
   bool isFoodUnlocked(int foodId) {
@@ -974,17 +932,15 @@ class GameController extends ChangeNotifier {
         .toDouble();
   }
 
-  Duration orderRewardCooldownRemaining(DateTime now) {
-    final lastRewardAt = _lastOrderRewardAt;
-    if (lastRewardAt == null) return Duration.zero;
-    final elapsed = now.difference(lastRewardAt);
-    if (elapsed >= manualOrderRewardCooldown) return Duration.zero;
-    if (elapsed.isNegative) return manualOrderRewardCooldown;
-    return manualOrderRewardCooldown - elapsed;
-  }
-
   Future<void> load({DateTime? now}) async {
+    await _saveQueue;
     final currentTime = now ?? DateTime.now();
+    final snapshotValues = _decodeSnapshot(
+      await this.storage.getString(_snapshotKey),
+    );
+    final restoredFromSnapshot = snapshotValues != null;
+    final GameStorage storage =
+        restoredFromSnapshot ? MemoryGameStorage(snapshotValues) : this.storage;
     _coins = await storage.getDouble(_coinsKey) ?? startingCoins;
     _lifetimeEarnings = await storage.getDouble(_lifetimeEarningsKey) ?? 0;
     _seatLevel = max(1, await storage.getInt(_seatLevelKey) ?? 1);
@@ -1001,16 +957,17 @@ class GameController extends ChangeNotifier {
       await storage.getString(_menuServeCountsKey),
     );
     _unlockedFoodIds = {
-      ..._defaultUnlockedFoodIds,
+      ...FoodCatalog.defaultUnlockedIds,
       ..._decodeIntSet(await storage.getString(_unlockedFoodIdsKey)),
     };
     _lastSavedAt = _parseSavedAt(
       await storage.getString(_lastSavedAtKey),
       currentTime,
     );
-    _lastOrderRewardAt = _parseOptionalDateTime(
-      await storage.getString(_lastOrderRewardAtKey),
-    );
+    final restoredPendingOfflineEarnings = max(
+      0,
+      await storage.getDouble(_pendingOfflineEarningsKey) ?? 0,
+    ).toDouble();
     _customerOrdersServed = max(
       0,
       await storage.getInt(_customerOrdersServedKey) ?? 0,
@@ -1060,6 +1017,15 @@ class GameController extends ChangeNotifier {
       0,
       await storage.getInt(_businessCheckoutQueueCountKey) ?? 0,
     );
+    _arrivalCarry = (await storage.getDouble(_arrivalCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
+    _kitchenCarry = (await storage.getDouble(_kitchenCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
+    _serviceCarry = (await storage.getDouble(_serviceCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
     _normalizeBusinessState();
     final storedDiningCustomers = _decodeDiningCustomers(
       await storage.getString(_diningCustomersKey),
@@ -1102,16 +1068,23 @@ class GameController extends ChangeNotifier {
     _syncBusinessCountCache();
     _resetDailyTasksIfNeeded(currentTime);
     _syncUnlockedFoods();
-    _pendingOfflineEarnings = calculateOfflineEarnings(currentTime);
+    _pendingOfflineEarnings =
+        restoredPendingOfflineEarnings + calculateOfflineEarnings(currentTime);
     _isLoaded = true;
+    if (!restoredFromSnapshot) {
+      await save();
+    }
     notifyListeners();
   }
 
   double calculateOfflineEarnings(DateTime now) {
-    final offlineMinutes = now.difference(_lastSavedAt).inMinutes;
-    if (offlineMinutes <= 0) return 0;
-    final cappedMinutes = min(offlineMinutes, maxOfflineMinutes);
-    return cappedMinutes * revenuePerMinute;
+    final offlineMinutes =
+        now.difference(_lastSavedAt).inSeconds / Duration.secondsPerMinute;
+    return GameBalance.offlineEarnings(
+      baselineRevenuePerMinute: baselineRevenuePerMinute,
+      elapsedMinutes: offlineMinutes,
+      restaurantLevel: restaurantLevel,
+    );
   }
 
   Future<void> claimOfflineEarnings({DateTime? now}) async {
@@ -1141,19 +1114,39 @@ class GameController extends ChangeNotifier {
     if (elapsed <= Duration.zero) return 0;
     final currentTime = now ?? DateTime.now();
     _resetDailyTasksIfNeeded(currentTime);
-    final seconds = min(maxBusinessTickSeconds, elapsed.inSeconds);
-    if (seconds <= 0) return 0;
+    final elapsedSeconds = min(
+      offlineMinuteCap * 60,
+      elapsed.inSeconds,
+    );
+    if (elapsedSeconds <= 0) return 0;
+    if (elapsed.inSeconds > maxBusinessTickSeconds) {
+      _pendingOfflineEarnings += GameBalance.offlineEarnings(
+        baselineRevenuePerMinute: baselineRevenuePerMinute,
+        elapsedMinutes: elapsedSeconds / Duration.secondsPerMinute,
+        restaurantLevel: restaurantLevel,
+      );
+      await save(now: currentTime);
+      notifyListeners();
+      return 0;
+    }
 
     final previousState = _diningStateSignature;
+    final previousArrivalCarry = _arrivalCarry;
+    final previousKitchenCarry = _kitchenCarry;
+    final previousServiceCarry = _serviceCarry;
     var completedOrders = 0;
-    for (var index = 0; index < seconds; index += 1) {
+    for (var index = 0; index < elapsedSeconds; index += 1) {
       final tickTime = currentTime.subtract(
-        Duration(seconds: seconds - index - 1),
+        Duration(seconds: elapsedSeconds - index - 1),
       );
       completedOrders += _simulateBusinessSecond(foodIds, tickTime);
     }
 
-    if (_diningStateSignature != previousState || completedOrders > 0) {
+    if (_diningStateSignature != previousState ||
+        completedOrders > 0 ||
+        _arrivalCarry != previousArrivalCarry ||
+        _kitchenCarry != previousKitchenCarry ||
+        _serviceCarry != previousServiceCarry) {
       _syncManualOrderFieldsFromDiningCustomers();
       _syncBusinessCountCache();
       await save(now: currentTime);
@@ -1263,22 +1256,6 @@ class GameController extends ChangeNotifier {
     return true;
   }
 
-  Future<double> rewardOrder(String totalPrice, {DateTime? now}) async {
-    final currentTime = now ?? DateTime.now();
-    if (orderRewardCooldownRemaining(currentTime) > Duration.zero) {
-      await save(now: currentTime);
-      notifyListeners();
-      return 0;
-    }
-
-    _coins += manualOrderRewardCoins;
-    _lifetimeEarnings += manualOrderRewardCoins;
-    _lastOrderRewardAt = currentTime;
-    await save(now: currentTime);
-    notifyListeners();
-    return manualOrderRewardCoins;
-  }
-
   Future<void> startShift({DateTime? now}) async {
     _shiftOrdersServed = 0;
     _shiftMissedOrders = 0;
@@ -1366,6 +1343,7 @@ class GameController extends ChangeNotifier {
 
   Future<double> serveCustomerOrder(
     List<int> foodIds, {
+    required int selectedFoodId,
     DateTime? now,
     double rewardMultiplier = 1,
     int combo = 0,
@@ -1378,6 +1356,7 @@ class GameController extends ChangeNotifier {
       await ensureCustomerOrder(foodIds, now: currentTime);
       return 0;
     }
+    if (manualCustomer.foodId != selectedFoodId) return 0;
     if (customerOrderExpired(currentTime)) {
       await missCustomerOrder(now: currentTime);
       return 0;
@@ -1442,125 +1421,122 @@ class GameController extends ChangeNotifier {
     return milestone.reward;
   }
 
-  Future<void> save({DateTime? now}) async {
+  Future<void> save({DateTime? now}) {
     if (now != null) {
       _lastSavedAt = now;
     }
     _syncManualOrderFieldsFromDiningCustomers();
     _syncBusinessCountCache();
-    await storage.setDouble(_coinsKey, _coins);
-    await storage.setDouble(_lifetimeEarningsKey, _lifetimeEarnings);
-    await storage.setInt(_seatLevelKey, _seatLevel);
-    await storage.setInt(_serviceLevelKey, _serviceLevel);
-    await storage.setInt(_kitchenLevelKey, _kitchenLevel);
-    await storage.setInt(_restaurantXpKey, _restaurantXp);
-    await storage.setInt(_customerOrdersServedKey, _customerOrdersServed);
-    await storage.setInt(_bestComboKey, _bestCombo);
-    await storage.setInt(_shiftOrdersServedKey, _shiftOrdersServed);
-    await storage.setInt(_shiftMissedOrdersKey, _shiftMissedOrders);
-    await storage.setInt(_shiftBestComboKey, _shiftBestCombo);
-    await storage.setDouble(_shiftCoinsEarnedKey, _shiftCoinsEarned);
-    await storage.setString(_dailyTaskDateKey, _dailyTaskDate);
-    await storage.setInt(_dailyOrdersServedKey, _dailyOrdersServed);
-    await storage.setInt(_dailyBestComboKey, _dailyBestCombo);
-    await storage.setInt(_dailyUpgradesKey, _dailyUpgrades);
-    await storage.setDouble(
-      _pendingBusinessEarningsKey,
-      _pendingBusinessEarnings,
-    );
-    await storage.setString(
-      _diningCustomersKey,
-      jsonEncode(
-          _diningCustomers.map((customer) => customer.toJson()).toList()),
-    );
-    await storage.setInt(_nextDiningCustomerIdKey, _nextDiningCustomerId);
-    await storage.setInt(_businessQueueCountKey, businessQueueCount);
-    await storage.setInt(_businessSeatedCountKey, businessSeatedCount);
-    await storage.setInt(
-      _businessKitchenQueueCountKey,
-      businessKitchenQueueCount,
-    );
-    await storage.setInt(_businessEatingCountKey, businessEatingCount);
-    await storage.setInt(
-      _businessCheckoutQueueCountKey,
-      businessCheckoutQueueCount,
-    );
-    await storage.setString(
-      _claimedMilestoneIdsKey,
-      jsonEncode(_claimedMilestoneIds.toList()..sort()),
-    );
-    await storage.setString(
-      _claimedDailyTaskIdsKey,
-      jsonEncode(_claimedDailyTaskIds.toList()..sort()),
-    );
-    await storage.setString(
-      _unlockedFoodIdsKey,
-      jsonEncode(_computedUnlockedFoodIds().toList()..sort()),
-    );
-    await storage.setString(
-      _menuUpgradeLevelsKey,
-      jsonEncode(
+    final encodedSnapshot = jsonEncode({
+      'version': _snapshotVersion,
+      'values': _snapshotValues(),
+    });
+    final operation = _saveQueue.then((_) async {
+      try {
+        await storage.setString(_snapshotKey, encodedSnapshot);
+        _lastSaveError = null;
+      } catch (error) {
+        _lastSaveError = error;
+      }
+    });
+    _saveQueue = operation;
+    return operation;
+  }
+
+  Map<String, Object> _snapshotValues() {
+    return {
+      _coinsKey: _coins,
+      _lifetimeEarningsKey: _lifetimeEarnings,
+      _pendingOfflineEarningsKey: _pendingOfflineEarnings,
+      _lastSavedAtKey: _lastSavedAt.toIso8601String(),
+      _seatLevelKey: _seatLevel,
+      _serviceLevelKey: _serviceLevel,
+      _kitchenLevelKey: _kitchenLevel,
+      _restaurantXpKey: _restaurantXp,
+      _customerOrdersServedKey: _customerOrdersServed,
+      _bestComboKey: _bestCombo,
+      _shiftOrdersServedKey: _shiftOrdersServed,
+      _shiftMissedOrdersKey: _shiftMissedOrders,
+      _shiftBestComboKey: _shiftBestCombo,
+      _shiftCoinsEarnedKey: _shiftCoinsEarned,
+      _dailyTaskDateKey: _dailyTaskDate,
+      _dailyOrdersServedKey: _dailyOrdersServed,
+      _dailyBestComboKey: _dailyBestCombo,
+      _dailyUpgradesKey: _dailyUpgrades,
+      _pendingBusinessEarningsKey: _pendingBusinessEarnings,
+      _diningCustomersKey: jsonEncode(
+        _diningCustomers.map((customer) => customer.toJson()).toList(),
+      ),
+      _nextDiningCustomerIdKey: _nextDiningCustomerId,
+      _businessQueueCountKey: businessQueueCount,
+      _businessSeatedCountKey: businessSeatedCount,
+      _businessKitchenQueueCountKey: businessKitchenQueueCount,
+      _businessEatingCountKey: businessEatingCount,
+      _businessCheckoutQueueCountKey: businessCheckoutQueueCount,
+      _arrivalCarryKey: _arrivalCarry,
+      _kitchenCarryKey: _kitchenCarry,
+      _serviceCarryKey: _serviceCarry,
+      _claimedMilestoneIdsKey:
+          jsonEncode(_claimedMilestoneIds.toList()..sort()),
+      _claimedDailyTaskIdsKey:
+          jsonEncode(_claimedDailyTaskIds.toList()..sort()),
+      _unlockedFoodIdsKey:
+          jsonEncode(_computedUnlockedFoodIds().toList()..sort()),
+      _menuUpgradeLevelsKey: jsonEncode(
         _menuUpgradeLevels.map(
           (foodId, level) => MapEntry(foodId.toString(), level),
         ),
       ),
-    );
-    await storage.setString(
-      _menuMasteryXpKey,
-      jsonEncode(
+      _menuMasteryXpKey: jsonEncode(
         _menuMasteryXp.map(
           (foodId, xp) => MapEntry(foodId.toString(), xp),
         ),
       ),
-    );
-    await storage.setString(
-      _menuServeCountsKey,
-      jsonEncode(
+      _menuServeCountsKey: jsonEncode(
         _menuServeCounts.map(
           (foodId, count) => MapEntry(foodId.toString(), count),
         ),
       ),
-    );
-    await storage.setString(_lastSavedAtKey, _lastSavedAt.toIso8601String());
-    if (_lastOrderRewardAt != null) {
-      await storage.setString(
-        _lastOrderRewardAtKey,
-        _lastOrderRewardAt!.toIso8601String(),
+      _activeCustomerTypeKey: _activeCustomerType.name,
+      if (_customerOrderFoodId != null &&
+          _customerOrderReward > 0 &&
+          _customerOrderCreatedAt != null) ...{
+        _customerOrderFoodIdKey: _customerOrderFoodId!,
+        _customerOrderRewardKey: _customerOrderReward,
+        _customerOrderCreatedAtKey: _customerOrderCreatedAt!.toIso8601String(),
+      },
+      if (_nextCustomerAvailableAt != null)
+        _nextCustomerAvailableAtKey:
+            _nextCustomerAvailableAt!.toIso8601String(),
+    };
+  }
+
+  Map<String, Object>? _decodeSnapshot(String? encodedSnapshot) {
+    if (encodedSnapshot == null || encodedSnapshot.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(encodedSnapshot);
+      if (decoded is! Map<String, dynamic> ||
+          decoded['version'] != _snapshotVersion ||
+          decoded['values'] is! Map<String, dynamic>) {
+        return null;
+      }
+      final values = decoded['values'] as Map<String, dynamic>;
+      return values.map(
+        (key, value) => MapEntry(key, value as Object),
       );
-    }
-    if (_customerOrderFoodId != null &&
-        _customerOrderReward > 0 &&
-        _customerOrderCreatedAt != null) {
-      await storage.setInt(_customerOrderFoodIdKey, _customerOrderFoodId!);
-      await storage.setDouble(_customerOrderRewardKey, _customerOrderReward);
-      await storage.setString(_activeCustomerTypeKey, _activeCustomerType.name);
-      await storage.setString(
-        _customerOrderCreatedAtKey,
-        _customerOrderCreatedAt!.toIso8601String(),
-      );
-    } else {
-      await storage.remove(_customerOrderFoodIdKey);
-      await storage.remove(_customerOrderRewardKey);
-      await storage.remove(_customerOrderCreatedAtKey);
-      await storage.remove(_activeCustomerTypeKey);
-    }
-    if (_nextCustomerAvailableAt != null) {
-      await storage.setString(
-        _nextCustomerAvailableAtKey,
-        _nextCustomerAvailableAt!.toIso8601String(),
-      );
-    } else {
-      await storage.remove(_nextCustomerAvailableAtKey);
+    } catch (_) {
+      return null;
     }
   }
 
   Future<void> reset({DateTime? now}) async {
+    await _saveQueue;
     await storage.clearGameData();
+    _lastSaveError = null;
     _coins = startingCoins;
     _lifetimeEarnings = 0;
     _pendingOfflineEarnings = 0;
     _lastSavedAt = now ?? DateTime.now();
-    _lastOrderRewardAt = null;
     _clearCustomerOrder();
     _nextCustomerAvailableAt = null;
     _customerOrdersServed = 0;
@@ -1592,7 +1568,7 @@ class GameController extends ChangeNotifier {
     _menuUpgradeLevels = {};
     _menuMasteryXp = {};
     _menuServeCounts = {};
-    _unlockedFoodIds = {..._defaultUnlockedFoodIds};
+    _unlockedFoodIds = {...FoodCatalog.defaultUnlockedIds};
     _claimedMilestoneIds = {};
     _claimedDailyTaskIds = {};
     _isLoaded = true;
@@ -2260,12 +2236,16 @@ class GameController extends ChangeNotifier {
   }
 
   Set<int> _computedUnlockedFoodIds() {
+    return _computedUnlockedFoodIdsFor(restaurantLevel);
+  }
+
+  Set<int> _computedUnlockedFoodIdsFor(int projectedRestaurantLevel) {
     final unlocked = <int>{
-      ..._defaultUnlockedFoodIds,
+      ...FoodCatalog.defaultUnlockedIds,
       ..._unlockedFoodIds,
     };
-    for (final foodId in _knownFoodIds) {
-      if (restaurantLevel >= foodUnlockLevel(foodId)) {
+    for (final foodId in FoodCatalog.ids) {
+      if (projectedRestaurantLevel >= foodUnlockLevel(foodId)) {
         unlocked.add(foodId);
       }
     }

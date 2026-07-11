@@ -22,7 +22,6 @@ void main() {
         await game.load(now: start.add(const Duration(minutes: 30)));
         final restaurant = Restaurant();
 
-        AppTheme.setActiveMode(mode);
         tester.view.physicalSize = Size(width, 900);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.resetPhysicalSize);
@@ -46,8 +45,18 @@ void main() {
           ),
         );
 
-        expect(find.textContaining('COINS'), findsOneWidget);
-        expect(find.textContaining('YEN/MIN'), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (widget) => widget is Text && widget.data?.trim() == 'COINS',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byWidgetPredicate(
+            (widget) => widget is Text && widget.data?.trim() == 'COINS/MIN',
+          ),
+          findsOneWidget,
+        );
         expect(find.text('NEW CUSTOMER ORDER'), findsOneWidget);
         expect(find.text('GOALS'), findsOneWidget);
         expect(find.text('UPGRADES'), findsOneWidget);

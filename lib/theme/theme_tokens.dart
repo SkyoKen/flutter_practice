@@ -1,9 +1,11 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:cyber_table_order/theme/app_theme_mode.dart';
 
 @immutable
 class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
+  final AppThemeMode mode;
   final Color background;
   final Color surface;
   final Color surfaceHigh;
@@ -19,6 +21,7 @@ class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
   final double radius;
 
   const AppThemeTokens({
+    required this.mode,
     required this.background,
     required this.surface,
     required this.surfaceHigh,
@@ -58,6 +61,7 @@ class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
 
   @override
   AppThemeTokens copyWith({
+    AppThemeMode? mode,
     Color? background,
     Color? surface,
     Color? surfaceHigh,
@@ -73,6 +77,7 @@ class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
     double? radius,
   }) {
     return AppThemeTokens(
+      mode: mode ?? this.mode,
       background: background ?? this.background,
       surface: surface ?? this.surface,
       surfaceHigh: surfaceHigh ?? this.surfaceHigh,
@@ -93,6 +98,7 @@ class AppThemeTokens extends ThemeExtension<AppThemeTokens> {
   AppThemeTokens lerp(ThemeExtension<AppThemeTokens>? other, double t) {
     if (other is! AppThemeTokens) return this;
     return AppThemeTokens(
+      mode: t < 0.5 ? mode : other.mode,
       background: Color.lerp(background, other.background, t)!,
       surface: Color.lerp(surface, other.surface, t)!,
       surfaceHigh: Color.lerp(surfaceHigh, other.surfaceHigh, t)!,
