@@ -197,11 +197,11 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
       _combo = nextCombo;
       _lastChoiceId = null;
       _lastChoiceCorrect = null;
+      final expectedBill =
+          '${widget.restaurant.translate('rush_expected_bill')} +${game.formatCoins(reward)}';
       _lastResultText = newBestCombo
-          ? '${widget.restaurant.translate('rush_new_best')} x$nextCombo'
-          : '${widget.restaurant.translate('rush_correct')} '
-              '${_formatMultiplier(multiplier)} / '
-              '${widget.restaurant.translate('rush_mastery')} +1';
+          ? '${widget.restaurant.translate('rush_new_best')} x$nextCombo · $expectedBill'
+          : '${widget.restaurant.translate('rush_correct')} · $expectedBill';
       _lastResultKind = _RushResultKind.success;
     });
 
@@ -209,9 +209,9 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
       context,
       backgroundColor: feedbackBackground,
       content: Text(
-        '${widget.restaurant.translate('rush_correct')} '
-        '+${game.formatCoins(reward)} / '
-        '${widget.restaurant.translate('rush_mastery')} +1',
+        '${widget.restaurant.translate('rush_correct')} · '
+        '${widget.restaurant.translate('rush_expected_bill')} '
+        '+${game.formatCoins(reward)}',
         style: TextStyle(
           color: AppTheme.foregroundOn(feedbackBackground),
           fontWeight: FontWeight.bold,
@@ -324,58 +324,72 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     final actionBackground = isTerminal ? theme.cyan : theme.accent;
     final actionForeground = AppTheme.foregroundOn(actionBackground);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _PromptLine(
-          icon: Icons.sensor_door,
-          title: widget.restaurant.translate('rush_ready_title'),
-          body: widget.restaurant.translate('rush_ready_body'),
-        ),
-        const SizedBox(height: 14),
-        Semantics(
-          key: const ValueKey('rush-seat-customer-action'),
-          button: true,
-          enabled: true,
-          label: widget.restaurant.translate('rush_start'),
-          onTap: () => _seatCustomer(context, game),
-          excludeSemantics: true,
-          child: SizedBox(
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: () => _seatCustomer(context, game),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: actionBackground,
-                foregroundColor: actionForeground,
-                side: BorderSide(
-                  color: isTerminal ? theme.cyan : theme.border,
-                  width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _PromptLine(
+                  icon: Icons.sensor_door,
+                  title: widget.restaurant.translate('rush_ready_title'),
+                  body: widget.restaurant.translate('rush_ready_body'),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(
-                    mode == AppThemeMode.neoBrutalism ? theme.radius : 0,
+                const SizedBox(height: 14),
+                Semantics(
+                  key: const ValueKey('rush-seat-customer-action'),
+                  button: true,
+                  enabled: true,
+                  label: widget.restaurant.translate('rush_start'),
+                  onTap: () => _seatCustomer(context, game),
+                  excludeSemantics: true,
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _seatCustomer(context, game),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: actionBackground,
+                        foregroundColor: actionForeground,
+                        side: BorderSide(
+                          color: isTerminal ? theme.cyan : theme.border,
+                          width: mode == AppThemeMode.neoBrutalism ? 3 : 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            mode == AppThemeMode.neoBrutalism
+                                ? theme.radius
+                                : 0,
+                          ),
+                        ),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.person_add_alt_1, size: 18),
+                      label: Text(
+                        widget.restaurant.translate('rush_start'),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
                   ),
                 ),
-                elevation: 0,
-              ),
-              icon: const Icon(Icons.person_add_alt_1, size: 18),
-              label: Text(
-                widget.restaurant.translate('rush_start'),
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
+              ],
             ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
   Widget _buildWaiting(BuildContext context, Duration remaining) {
-    return _PromptLine(
-      icon: Icons.hourglass_bottom,
-      title: widget.restaurant.translate('rush_waiting_title'),
-      body:
-          '${widget.restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}',
+    return Center(
+      child: _PromptLine(
+        icon: Icons.hourglass_bottom,
+        title: widget.restaurant.translate('rush_waiting_title'),
+        body:
+            '${widget.restaurant.translate('idle_next_customer_in')} ${_formatSeconds(remaining)}',
+      ),
     );
   }
 
@@ -388,18 +402,22 @@ class _KitchenRushPanelState extends State<KitchenRushPanel> {
     final remaining = game.diningCustomerPhaseRemaining(customer, now);
     final body = _manualStatusBody(customer, remaining);
 
-    return _PromptLine(
-      icon: _manualStatusIcon(customer.phase),
-      title: _manualStatusTitle(customer.phase),
-      body: body,
+    return Center(
+      child: _PromptLine(
+        icon: _manualStatusIcon(customer.phase),
+        title: _manualStatusTitle(customer.phase),
+        body: body,
+      ),
     );
   }
 
   Widget _buildTimedOut(BuildContext context) {
-    return _PromptLine(
-      icon: Icons.person_off,
-      title: widget.restaurant.translate('rush_customer_left'),
-      body: widget.restaurant.translate('rush_try_next'),
+    return Center(
+      child: _PromptLine(
+        icon: Icons.person_off,
+        title: widget.restaurant.translate('rush_customer_left'),
+        body: widget.restaurant.translate('rush_try_next'),
+      ),
     );
   }
 
@@ -705,49 +723,26 @@ class _KitchenRushFrame extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(
-                isTerminal ? Icons.terminal : Icons.local_fire_department,
-                color: isTerminal ? theme.cyan : theme.accent,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  restaurant.translate('rush_title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isTerminal ? theme.cyan : theme.ink,
-                    fontFamily: isTerminal ? 'Courier' : null,
-                    fontWeight: FontWeight.w900,
+          Align(
+            key: const ValueKey('rush-status-badges'),
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.end,
+              children: [
+                _RushBadge(
+                  label: '${restaurant.translate('rush_combo')} x$combo',
+                ),
+                if (bestCombo > 0)
+                  _RushBadge(
+                    label: '${restaurant.translate('rush_best')} x$bestCombo',
                   ),
+                _RushBadge(
+                  label: '${restaurant.translate('rush_bonus')} $bonusLabel',
                 ),
-              ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 220),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.end,
-                  children: [
-                    _RushBadge(
-                      label: '${restaurant.translate('rush_combo')} x$combo',
-                    ),
-                    if (bestCombo > 0)
-                      _RushBadge(
-                        label:
-                            '${restaurant.translate('rush_best')} x$bestCombo',
-                      ),
-                    _RushBadge(
-                      label:
-                          '${restaurant.translate('rush_bonus')} $bonusLabel',
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
           if (resultText != null && resultKind != null) ...[
             const SizedBox(height: 8),

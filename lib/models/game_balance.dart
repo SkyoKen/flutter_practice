@@ -5,6 +5,14 @@ class GameBalance {
 
   static const businessMealBaseSeconds = 14;
   static const businessMealMinSeconds = 8;
+  static const customerSeatingSeconds = 2;
+  static const foodServingSeconds = 2;
+  static const customerLeavingSeconds = 2;
+  static const maxOfflineMinutes = 480;
+  static const operationUpgradeGrowth = 1.8;
+  static const menuUpgradeGrowth = 1.7;
+
+  static int diningCapacity(int seatLevel) => max(2, seatLevel + 1);
 
   static int restaurantLevel({
     required int seatLevel,
@@ -31,7 +39,7 @@ class GameBalance {
   }
 
   static double kitchenOrdersPerMinute(int kitchenLevel) {
-    return 8 + kitchenLevel * 1.4;
+    return min(60, 8 + kitchenLevel * 1.4);
   }
 
   static Duration businessMealDuration({
@@ -44,12 +52,79 @@ class GameBalance {
     return Duration(seconds: max(minSeconds, seconds));
   }
 
-  static double mealOrdersPerMinute(Duration mealDuration) {
-    return 60 / mealDuration.inSeconds;
+  static double seatTurnoverOrdersPerMinute({
+    required int diningCapacity,
+    required Duration mealDuration,
+    required double kitchenRatePerMinute,
+    required double checkoutRatePerMinute,
+  }) {
+    if (diningCapacity <= 0) return 0;
+
+    final kitchenSeconds = 60 / max(0.001, kitchenRatePerMinute);
+    final checkoutSeconds = 60 / max(0.001, checkoutRatePerMinute);
+    final occupiedSeconds = customerSeatingSeconds +
+        kitchenSeconds +
+        foodServingSeconds +
+        mealDuration.inSeconds +
+        checkoutSeconds +
+        customerLeavingSeconds;
+    return diningCapacity * 60 / occupiedSeconds;
   }
 
   static double checkoutOrdersPerMinute(int serviceLevel) {
-    return 8 + serviceLevel * 1.4;
+    return min(60, 8 + serviceLevel * 1.4);
+  }
+
+  static double operationUpgradeCost({
+    required double baseCost,
+    required int currentLevel,
+    double eventMultiplier = 1,
+  }) {
+    return _roundUpToFive(
+      baseCost *
+          pow(operationUpgradeGrowth, max(0, currentLevel - 1)) *
+          eventMultiplier,
+    );
+  }
+
+  static double menuUpgradeCost(
+    int currentLevel, {
+    double eventMultiplier = 1,
+  }) {
+    return _roundUpToFive(
+      60 * pow(menuUpgradeGrowth, max(0, currentLevel)) * eventMultiplier,
+    );
+  }
+
+  static int offlineMinuteCap(int restaurantLevel) {
+    if (restaurantLevel >= 10) return maxOfflineMinutes;
+    if (restaurantLevel >= 8) return 360;
+    if (restaurantLevel >= 5) return 240;
+    if (restaurantLevel >= 3) return 120;
+    return 60;
+  }
+
+  static double offlineEfficiency(int restaurantLevel) {
+    if (restaurantLevel >= 10) return 0.15;
+    if (restaurantLevel >= 8) return 0.14;
+    if (restaurantLevel >= 5) return 0.12;
+    if (restaurantLevel >= 3) return 0.10;
+    return 0.08;
+  }
+
+  static double offlineEarnings({
+    required double baselineRevenuePerMinute,
+    required double elapsedMinutes,
+    required int restaurantLevel,
+  }) {
+    if (elapsedMinutes <= 0 || baselineRevenuePerMinute <= 0) return 0;
+    final creditedMinutes = min(
+      elapsedMinutes,
+      offlineMinuteCap(restaurantLevel).toDouble(),
+    );
+    return creditedMinutes *
+        baselineRevenuePerMinute *
+        offlineEfficiency(restaurantLevel);
   }
 
   static double minimumThroughputPerMinute({
@@ -76,11 +151,19 @@ class GameBalance {
     int mealBaseSeconds = businessMealBaseSeconds,
     int mealMinSeconds = businessMealMinSeconds,
   }) {
+    final kitchenRate = kitchenOrdersPerMinute(kitchenLevel);
+    final checkoutRate = checkoutOrdersPerMinute(serviceLevel);
     final mealDuration = businessMealDuration(
       seatLevel: seatLevel,
       serviceLevel: serviceLevel,
       baseSeconds: mealBaseSeconds,
       minSeconds: mealMinSeconds,
+    );
+    final seatTurnoverRate = seatTurnoverOrdersPerMinute(
+      diningCapacity: diningCapacity(seatLevel),
+      mealDuration: mealDuration,
+      kitchenRatePerMinute: kitchenRate,
+      checkoutRatePerMinute: checkoutRate,
     );
     return minimumThroughputPerMinute(
       arrivalRatePerMinute: customerArrivalRatePerMinute(
@@ -88,9 +171,9 @@ class GameBalance {
         restaurantLevel: restaurantLevel,
         eventMultiplier: arrivalEventMultiplier,
       ),
-      kitchenRatePerMinute: kitchenOrdersPerMinute(kitchenLevel),
-      mealRatePerMinute: mealOrdersPerMinute(mealDuration),
-      checkoutRatePerMinute: checkoutOrdersPerMinute(serviceLevel),
+      kitchenRatePerMinute: kitchenRate,
+      mealRatePerMinute: seatTurnoverRate,
+      checkoutRatePerMinute: checkoutRate,
     );
   }
 
@@ -123,5 +206,9 @@ class GameBalance {
       return '$number${unit.suffix}';
     }
     return value.round().toString();
+  }
+
+  static double _roundUpToFive(num value) {
+    return (value / 5).ceilToDouble() * 5;
   }
 }

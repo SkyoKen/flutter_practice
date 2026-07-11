@@ -215,8 +215,9 @@ class _LanguageButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(theme.radius),
           child: Container(
             width: 52,
+            constraints: const BoxConstraints(minHeight: 48),
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
             decoration: BoxDecoration(
               border: Border.all(
                 color: theme.border,

@@ -126,6 +126,7 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
     final isTerminal = mode == AppThemeMode.neonTerminal;
     final isRetro = mode == AppThemeMode.retroOS;
     final isPaper = mode == AppThemeMode.paperReceipt;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
     final now = DateTime.now();
     final customers = game.diningCustomers;
     final manualCustomer = game.manualDiningCustomer;
@@ -192,18 +193,26 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
             final compact = width < 620;
             final tall = stageHeight >= 220;
             final serviceWidth = compact ? 70.0 : 108.0;
-            final floorTop = tall
-                ? compact
-                    ? 86.0
-                    : 92.0
-                : compact
-                    ? 56.0
-                    : 58.0;
-            final floorHeight = tall
+            final floorTop = largeText
+                ? tall
+                    ? 116.0
+                    : 98.0
+                : tall
+                    ? compact
+                        ? 86.0
+                        : 92.0
+                    : compact
+                        ? 56.0
+                        : 58.0;
+            final desiredFloorHeight = tall
                 ? math.max(82.0, stageHeight - floorTop - 30)
                 : compact
                     ? 62.0
                     : 92.0;
+            final floorHeight = math.min(
+              desiredFloorHeight,
+              math.max(48.0, constraints.maxHeight - floorTop),
+            );
             final waitingAreaLeft = 0.0;
             final waitingAreaWidth = compact ? 70.0 : 94.0;
             final entranceLeft = waitingAreaWidth + (compact ? 6 : 8);
@@ -453,20 +462,24 @@ class _CustomerArrivalStageState extends State<CustomerArrivalStage>
                       const SizedBox(height: 7),
                       Row(
                         children: [
-                          _StageStat(
-                            icon: Icons.people_alt,
-                            label: widget.restaurant
-                                .translate('idle_business_queue'),
-                            value:
-                                '${game.businessQueueCount}/${game.businessMaxQueue}',
+                          Expanded(
+                            child: _StageStat(
+                              icon: Icons.people_alt,
+                              label: widget.restaurant
+                                  .translate('idle_business_queue'),
+                              value:
+                                  '${game.businessQueueCount}/${game.businessMaxQueue}',
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          _StageStat(
-                            icon: Icons.table_restaurant,
-                            label: widget.restaurant
-                                .translate('idle_business_tables'),
-                            value:
-                                '${game.businessSeatedCount}/${game.diningCapacity}',
+                          Expanded(
+                            child: _StageStat(
+                              icon: Icons.table_restaurant,
+                              label: widget.restaurant
+                                  .translate('idle_business_tables'),
+                              value:
+                                  '${game.businessSeatedCount}/${game.diningCapacity}',
+                            ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -885,9 +898,10 @@ class _StageStat extends StatelessWidget {
     final theme = AppTheme.of(context);
     final mode = AppTheme.modeOf(context);
     final isTerminal = mode == AppThemeMode.neonTerminal;
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
 
     return Container(
-      height: 24,
+      height: largeText ? 44 : 24,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: isTerminal

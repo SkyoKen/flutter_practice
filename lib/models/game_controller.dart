@@ -51,9 +51,12 @@ class GameController extends ChangeNotifier {
   static const _businessKitchenQueueCountKey = 'idle_business_kitchen_queue';
   static const _businessEatingCountKey = 'idle_business_eating_count';
   static const _businessCheckoutQueueCountKey = 'idle_business_checkout_queue';
+  static const _arrivalCarryKey = 'idle_arrival_carry';
+  static const _kitchenCarryKey = 'idle_kitchen_carry';
+  static const _serviceCarryKey = 'idle_service_carry';
 
   static const startingCoins = 120.0;
-  static const maxOfflineMinutes = 480;
+  static const maxOfflineMinutes = GameBalance.maxOfflineMinutes;
   static const shiftTargetOrders = 4;
   static const restaurantXpPerLevel = 100;
   static const customerOrderBaseReward = 18.0;
@@ -63,9 +66,15 @@ class GameController extends ChangeNotifier {
   static const customerPatienceMaxSeconds = 30;
   static const businessMealBaseSeconds = GameBalance.businessMealBaseSeconds;
   static const businessMealMinSeconds = GameBalance.businessMealMinSeconds;
-  static const customerSeatingDuration = Duration(seconds: 2);
-  static const foodServingDuration = Duration(seconds: 2);
-  static const customerLeavingDuration = Duration(seconds: 2);
+  static const customerSeatingDuration = Duration(
+    seconds: GameBalance.customerSeatingSeconds,
+  );
+  static const foodServingDuration = Duration(
+    seconds: GameBalance.foodServingSeconds,
+  );
+  static const customerLeavingDuration = Duration(
+    seconds: GameBalance.customerLeavingSeconds,
+  );
   static const menuMasteryXpPerLevel = 4;
   static const maxBusinessTickSeconds = 120;
 
@@ -189,7 +198,7 @@ class GameController extends ChangeNotifier {
   int get businessCheckoutQueueCount => _autoCustomers
       .where((customer) => customer.phase == GameDiningCustomerPhase.checkout)
       .length;
-  int get diningCapacity => max(2, _seatLevel + 1);
+  int get diningCapacity => GameBalance.diningCapacity(_seatLevel);
   int get businessMaxQueue => max(4, diningCapacity * 2);
   double get businessLoadRatio {
     if (diningCapacity <= 0) return 0;
@@ -229,8 +238,12 @@ class GameController extends ChangeNotifier {
         serviceLevel: _serviceLevel,
       );
 
-  double get mealOrdersPerMinute =>
-      GameBalance.mealOrdersPerMinute(businessMealDuration);
+  double get mealOrdersPerMinute => GameBalance.seatTurnoverOrdersPerMinute(
+        diningCapacity: diningCapacity,
+        mealDuration: businessMealDuration,
+        kitchenRatePerMinute: kitchenOrdersPerMinute,
+        checkoutRatePerMinute: serviceOrdersPerMinute,
+      );
 
   double get serviceOrdersPerMinute =>
       GameBalance.checkoutOrdersPerMinute(_serviceLevel);
@@ -248,6 +261,13 @@ class GameController extends ChangeNotifier {
         arrivalEventMultiplier: _arrivalEventMultiplier,
       );
 
+  double get baselineAutoOrdersPerMinute => GameBalance.autoOrdersPerMinute(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        restaurantLevel: restaurantLevel,
+      );
+
   double get averageAutoOrderReward => _averageAutoOrderRewardFor(
         seatLevel: _seatLevel,
         serviceLevel: _serviceLevel,
@@ -255,8 +275,23 @@ class GameController extends ChangeNotifier {
         projectedRestaurantLevel: restaurantLevel,
       );
 
+  double get baselineAverageAutoOrderReward => _averageAutoOrderRewardFor(
+        seatLevel: _seatLevel,
+        serviceLevel: _serviceLevel,
+        kitchenLevel: _kitchenLevel,
+        projectedRestaurantLevel: restaurantLevel,
+        rewardMultiplier: 1,
+      );
+
   double get autoRevenuePerMinute =>
       autoOrdersPerMinute * averageAutoOrderReward;
+
+  double get baselineRevenuePerMinute =>
+      baselineAutoOrdersPerMinute * baselineAverageAutoOrderReward;
+
+  int get offlineMinuteCap => GameBalance.offlineMinuteCap(restaurantLevel);
+  double get offlineEfficiency =>
+      GameBalance.offlineEfficiency(restaurantLevel);
 
   GameBusinessDiagnosis get businessDiagnosis {
     final bottleneck = _diagnoseBusinessBottleneck();
@@ -291,41 +326,29 @@ class GameController extends ChangeNotifier {
     final previews = GameOperationUpgradeType.values
         .map(_buildOperationUpgradePreview)
         .toList(growable: false);
-    final preferredTypes = switch (businessBottleneck) {
-      GameBusinessBottleneck.seats => {GameOperationUpgradeType.seats},
-      GameBusinessBottleneck.kitchen => {GameOperationUpgradeType.kitchen},
-      GameBusinessBottleneck.dining => {
-          GameOperationUpgradeType.seats,
-          GameOperationUpgradeType.service,
-        },
-      GameBusinessBottleneck.checkout => {GameOperationUpgradeType.service},
-      GameBusinessBottleneck.balanced =>
-        GameOperationUpgradeType.values.toSet(),
-    };
-    var candidates = previews
-        .where(
-          (preview) =>
-              preferredTypes.contains(preview.type) &&
-              preview.coinsPerMinuteGain > 0,
+    final candidates = GameOperationUpgradeType.values
+        .map(
+          (type) => _buildOperationUpgradePreview(
+            type,
+            applyEventDiscount: false,
+          ),
         )
-        .toList(growable: false);
-    if (candidates.isEmpty) {
-      candidates = previews
-          .where((preview) => preview.coinsPerMinuteGain > 0)
-          .toList(growable: false);
-    }
+        .where((preview) => preview.coinsPerMinuteGain > 0)
+        .toList();
+    candidates.sort((left, right) {
+      final payback = left.paybackMinutes!.compareTo(right.paybackMinutes!);
+      if (payback != 0) return payback;
+      final gain = right.coinsPerMinuteGain.compareTo(
+        left.coinsPerMinuteGain,
+      );
+      if (gain != 0) return gain;
+      final cost = left.cost.compareTo(right.cost);
+      if (cost != 0) return cost;
+      return left.type.index.compareTo(right.type.index);
+    });
     GameOperationUpgradeType? recommendedType;
     if (candidates.isNotEmpty) {
-      recommendedType = candidates.reduce((best, candidate) {
-        if (candidate.gainPerCoinSpent > best.gainPerCoinSpent) {
-          return candidate;
-        }
-        if (candidate.gainPerCoinSpent == best.gainPerCoinSpent &&
-            candidate.coinsPerMinuteGain > best.coinsPerMinuteGain) {
-          return candidate;
-        }
-        return best;
-      }).type;
+      recommendedType = candidates.first.type;
     }
     return List.unmodifiable(
       previews.map(
@@ -345,8 +368,12 @@ class GameController extends ChangeNotifier {
   }
 
   GameOperationUpgradeType? get recommendedOperationUpgradeType {
+    return recommendedOperationUpgradePreview?.type;
+  }
+
+  GameOperationUpgradePreview? get recommendedOperationUpgradePreview {
     for (final preview in operationUpgradePreviews) {
-      if (preview.isRecommended) return preview.type;
+      if (preview.isRecommended) return preview;
     }
     return null;
   }
@@ -442,16 +469,16 @@ class GameController extends ChangeNotifier {
         id: 'better_seats',
         titleKey: 'idle_goal_better_seats_title',
         descriptionKey: 'idle_goal_better_seats_desc',
-        progress: _seatLevel,
-        target: 2,
+        progress: max(0, _seatLevel - 1),
+        target: 1,
         reward: 80,
       ),
       _milestone(
         id: 'quick_service',
         titleKey: 'idle_goal_quick_service_title',
         descriptionKey: 'idle_goal_quick_service_desc',
-        progress: _serviceLevel,
-        target: 2,
+        progress: max(0, _serviceLevel - 1),
+        target: 1,
         reward: 80,
       ),
       _milestone(
@@ -466,8 +493,8 @@ class GameController extends ChangeNotifier {
         id: 'shop_level_two',
         titleKey: 'idle_goal_shop_level_two_title',
         descriptionKey: 'idle_goal_shop_level_two_desc',
-        progress: restaurantLevel,
-        target: 2,
+        progress: max(0, restaurantLevel - 1),
+        target: 1,
         reward: 180,
       ),
     ];
@@ -512,10 +539,19 @@ class GameController extends ChangeNotifier {
       claimableMilestoneCount + claimableDailyTaskCount;
 
   GameMilestone? get nextMilestone {
-    for (final milestone in milestones) {
-      if (!milestone.claimed) return milestone;
+    final remaining = milestones
+        .where((milestone) => !milestone.claimed)
+        .toList(growable: false);
+    for (final milestone in remaining) {
+      if (milestone.claimable) return milestone;
     }
-    return null;
+    GameMilestone? closest;
+    for (final milestone in remaining) {
+      if (closest == null || milestone.progressRatio > closest.progressRatio) {
+        closest = milestone;
+      }
+    }
+    return closest;
   }
 
   int get _totalMenuUpgradeLevels =>
@@ -555,17 +591,29 @@ class GameController extends ChangeNotifier {
 
   double menuUpgradeCost(int foodId) {
     final level = menuLevel(foodId);
-    return (60 + level * 40) * activeEventUpgradeCostMultiplier;
+    return GameBalance.menuUpgradeCost(
+      level,
+      eventMultiplier: activeEventUpgradeCostMultiplier,
+    );
   }
 
-  double get seatUpgradeCost =>
-      (100 + (_seatLevel - 1) * 75) * activeEventUpgradeCostMultiplier;
+  double get seatUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 100,
+        currentLevel: _seatLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
-  double get serviceUpgradeCost =>
-      (90 + (_serviceLevel - 1) * 70) * activeEventUpgradeCostMultiplier;
+  double get serviceUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 90,
+        currentLevel: _serviceLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
-  double get kitchenUpgradeCost =>
-      (110 + (_kitchenLevel - 1) * 80) * activeEventUpgradeCostMultiplier;
+  double get kitchenUpgradeCost => GameBalance.operationUpgradeCost(
+        baseCost: 110,
+        currentLevel: _kitchenLevel,
+        eventMultiplier: activeEventUpgradeCostMultiplier,
+      );
 
   String formatCoins(double value) => formatCompactCoins(value);
 
@@ -630,8 +678,9 @@ class GameController extends ChangeNotifier {
   }
 
   GameOperationUpgradePreview _buildOperationUpgradePreview(
-    GameOperationUpgradeType type,
-  ) {
+    GameOperationUpgradeType type, {
+    bool applyEventDiscount = true,
+  }) {
     var projectedSeatLevel = _seatLevel;
     var projectedServiceLevel = _serviceLevel;
     var projectedKitchenLevel = _kitchenLevel;
@@ -640,10 +689,24 @@ class GameController extends ChangeNotifier {
       GameOperationUpgradeType.kitchen => _kitchenLevel,
       GameOperationUpgradeType.service => _serviceLevel,
     };
+    final eventMultiplier =
+        applyEventDiscount ? activeEventUpgradeCostMultiplier : 1.0;
     final cost = switch (type) {
-      GameOperationUpgradeType.seats => seatUpgradeCost,
-      GameOperationUpgradeType.kitchen => kitchenUpgradeCost,
-      GameOperationUpgradeType.service => serviceUpgradeCost,
+      GameOperationUpgradeType.seats => GameBalance.operationUpgradeCost(
+          baseCost: 100,
+          currentLevel: _seatLevel,
+          eventMultiplier: eventMultiplier,
+        ),
+      GameOperationUpgradeType.kitchen => GameBalance.operationUpgradeCost(
+          baseCost: 110,
+          currentLevel: _kitchenLevel,
+          eventMultiplier: eventMultiplier,
+        ),
+      GameOperationUpgradeType.service => GameBalance.operationUpgradeCost(
+          baseCost: 90,
+          currentLevel: _serviceLevel,
+          eventMultiplier: eventMultiplier,
+        ),
     };
     switch (type) {
       case GameOperationUpgradeType.seats:
@@ -666,24 +729,24 @@ class GameController extends ChangeNotifier {
       serviceLevel: projectedServiceLevel,
       kitchenLevel: projectedKitchenLevel,
       restaurantLevel: projectedRestaurantLevel,
-      arrivalEventMultiplier: _arrivalEventMultiplier,
     );
     final projectedReward = _averageAutoOrderRewardFor(
       seatLevel: projectedSeatLevel,
       serviceLevel: projectedServiceLevel,
       kitchenLevel: projectedKitchenLevel,
       projectedRestaurantLevel: projectedRestaurantLevel,
+      rewardMultiplier: 1,
     );
     final projectedCoinsPerMinute = projectedOrdersPerMinute * projectedReward;
     return GameOperationUpgradePreview(
       type: type,
       currentLevel: currentLevel,
       upgradedLevel: currentLevel + 1,
-      currentOrdersPerMinute: autoOrdersPerMinute,
+      currentOrdersPerMinute: baselineAutoOrdersPerMinute,
       upgradedOrdersPerMinute: projectedOrdersPerMinute,
-      currentCoinsPerMinute: autoRevenuePerMinute,
+      currentCoinsPerMinute: baselineRevenuePerMinute,
       upgradedCoinsPerMinute: projectedCoinsPerMinute,
-      coinsPerMinuteGain: projectedCoinsPerMinute - autoRevenuePerMinute,
+      coinsPerMinuteGain: projectedCoinsPerMinute - baselineRevenuePerMinute,
       cost: cost,
       canAfford: _coins >= cost,
       isRecommended: false,
@@ -695,6 +758,7 @@ class GameController extends ChangeNotifier {
     required int serviceLevel,
     required int kitchenLevel,
     required int projectedRestaurantLevel,
+    double? rewardMultiplier,
   }) {
     final ids = _computedUnlockedFoodIdsFor(projectedRestaurantLevel).toList()
       ..sort();
@@ -711,7 +775,8 @@ class GameController extends ChangeNotifier {
             projectedRestaurantLevel: projectedRestaurantLevel,
           ),
     );
-    return (total / ids.length) * activeEventRewardMultiplier;
+    return (total / ids.length) *
+        (rewardMultiplier ?? activeEventRewardMultiplier);
   }
 
   double _customerOrderRewardForFoodAtLevels(
@@ -952,6 +1017,15 @@ class GameController extends ChangeNotifier {
       0,
       await storage.getInt(_businessCheckoutQueueCountKey) ?? 0,
     );
+    _arrivalCarry = (await storage.getDouble(_arrivalCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
+    _kitchenCarry = (await storage.getDouble(_kitchenCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
+    _serviceCarry = (await storage.getDouble(_serviceCarryKey) ?? 0)
+        .clamp(0, 0.999999)
+        .toDouble();
     _normalizeBusinessState();
     final storedDiningCustomers = _decodeDiningCustomers(
       await storage.getString(_diningCustomersKey),
@@ -1004,10 +1078,13 @@ class GameController extends ChangeNotifier {
   }
 
   double calculateOfflineEarnings(DateTime now) {
-    final offlineMinutes = now.difference(_lastSavedAt).inMinutes;
-    if (offlineMinutes <= 0) return 0;
-    final cappedMinutes = min(offlineMinutes, maxOfflineMinutes);
-    return cappedMinutes * revenuePerMinute;
+    final offlineMinutes =
+        now.difference(_lastSavedAt).inSeconds / Duration.secondsPerMinute;
+    return GameBalance.offlineEarnings(
+      baselineRevenuePerMinute: baselineRevenuePerMinute,
+      elapsedMinutes: offlineMinutes,
+      restaurantLevel: restaurantLevel,
+    );
   }
 
   Future<void> claimOfflineEarnings({DateTime? now}) async {
@@ -1038,30 +1115,38 @@ class GameController extends ChangeNotifier {
     final currentTime = now ?? DateTime.now();
     _resetDailyTasksIfNeeded(currentTime);
     final elapsedSeconds = min(
-      maxOfflineMinutes * 60,
+      offlineMinuteCap * 60,
       elapsed.inSeconds,
     );
-    final seconds = min(maxBusinessTickSeconds, elapsedSeconds);
-    if (seconds <= 0) return 0;
-
-    final passiveSeconds = elapsedSeconds - seconds;
-    if (passiveSeconds > 0) {
-      _pendingOfflineEarnings +=
-          revenuePerMinute * passiveSeconds / Duration.secondsPerMinute;
+    if (elapsedSeconds <= 0) return 0;
+    if (elapsed.inSeconds > maxBusinessTickSeconds) {
+      _pendingOfflineEarnings += GameBalance.offlineEarnings(
+        baselineRevenuePerMinute: baselineRevenuePerMinute,
+        elapsedMinutes: elapsedSeconds / Duration.secondsPerMinute,
+        restaurantLevel: restaurantLevel,
+      );
+      await save(now: currentTime);
+      notifyListeners();
+      return 0;
     }
 
     final previousState = _diningStateSignature;
+    final previousArrivalCarry = _arrivalCarry;
+    final previousKitchenCarry = _kitchenCarry;
+    final previousServiceCarry = _serviceCarry;
     var completedOrders = 0;
-    for (var index = 0; index < seconds; index += 1) {
+    for (var index = 0; index < elapsedSeconds; index += 1) {
       final tickTime = currentTime.subtract(
-        Duration(seconds: seconds - index - 1),
+        Duration(seconds: elapsedSeconds - index - 1),
       );
       completedOrders += _simulateBusinessSecond(foodIds, tickTime);
     }
 
     if (_diningStateSignature != previousState ||
         completedOrders > 0 ||
-        passiveSeconds > 0) {
+        _arrivalCarry != previousArrivalCarry ||
+        _kitchenCarry != previousKitchenCarry ||
+        _serviceCarry != previousServiceCarry) {
       _syncManualOrderFieldsFromDiningCustomers();
       _syncBusinessCountCache();
       await save(now: currentTime);
@@ -1388,6 +1473,9 @@ class GameController extends ChangeNotifier {
       _businessKitchenQueueCountKey: businessKitchenQueueCount,
       _businessEatingCountKey: businessEatingCount,
       _businessCheckoutQueueCountKey: businessCheckoutQueueCount,
+      _arrivalCarryKey: _arrivalCarry,
+      _kitchenCarryKey: _kitchenCarry,
+      _serviceCarryKey: _serviceCarry,
       _claimedMilestoneIdsKey:
           jsonEncode(_claimedMilestoneIds.toList()..sort()),
       _claimedDailyTaskIdsKey:

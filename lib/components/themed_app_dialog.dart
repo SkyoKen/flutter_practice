@@ -269,7 +269,7 @@ class ThemedDialogButton extends StatelessWidget {
     );
 
     return SizedBox(
-      height: 42,
+      height: 48,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(

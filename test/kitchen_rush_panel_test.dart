@@ -42,7 +42,10 @@ void main() {
       ),
     );
 
-    expect(find.text('KITCHEN RUSH'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('rush-status-badges')),
+      findsOneWidget,
+    );
     expect(find.text('SEAT CUSTOMER'), findsOneWidget);
     final seatAction = find.byKey(
       const ValueKey('rush-seat-customer-action'),
@@ -81,9 +84,12 @@ void main() {
     expect(tester.getSize(activeDishAction).height, greaterThanOrEqualTo(48));
     semantics.dispose();
 
+    final coinsBeforeServing = game.coins;
     await tester.tap(find.text('Signature Wagyu Burger').last);
     await tester.pumpAndSettle();
 
+    expect(find.textContaining('EXPECTED BILL'), findsWidgets);
+    expect(game.coins, coinsBeforeServing);
     expect(find.text('Delivering dish'), findsOneWidget);
     await game.simulateBusinessTick(
       const [],

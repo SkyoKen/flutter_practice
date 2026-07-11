@@ -65,11 +65,29 @@ void main() {
       );
       expect(defaultMeal, const Duration(seconds: 14));
       expect(cappedMeal, const Duration(seconds: 8));
+      expect(GameBalance.diningCapacity(1), 2);
+      expect(GameBalance.diningCapacity(4), 5);
       expect(
-        GameBalance.mealOrdersPerMinute(defaultMeal),
-        closeTo(60 / 14, 0.001),
+        GameBalance.seatTurnoverOrdersPerMinute(
+          diningCapacity: 2,
+          mealDuration: defaultMeal,
+          kitchenRatePerMinute: 9.4,
+          checkoutRatePerMinute: 9.4,
+        ),
+        closeTo(
+          120 / (2 + 60 / 9.4 + 2 + 14 + 60 / 9.4 + 2),
+          0.001,
+        ),
       );
-      expect(GameBalance.mealOrdersPerMinute(cappedMeal), 7.5);
+      expect(
+        GameBalance.seatTurnoverOrdersPerMinute(
+          diningCapacity: 5,
+          mealDuration: cappedMeal,
+          kitchenRatePerMinute: 15,
+          checkoutRatePerMinute: 15,
+        ),
+        closeTo(300 / 22, 0.001),
+      );
     });
 
     test('uses the minimum of the four stages as throughput', () {
@@ -89,8 +107,78 @@ void main() {
           kitchenLevel: 1,
           restaurantLevel: 1,
         ),
-        closeTo(60 / 14, 0.001),
+        closeTo(
+          120 / (2 + 60 / 9.4 + 2 + 14 + 60 / 9.4 + 2),
+          0.001,
+        ),
       );
+    });
+
+    test('uses exponential upgrade costs with stable five-coin rounding', () {
+      expect(
+        GameBalance.operationUpgradeCost(baseCost: 100, currentLevel: 1),
+        100,
+      );
+      expect(
+        GameBalance.operationUpgradeCost(baseCost: 90, currentLevel: 2),
+        165,
+      );
+      expect(
+        GameBalance.operationUpgradeCost(baseCost: 100, currentLevel: 10),
+        19840,
+      );
+      expect(GameBalance.menuUpgradeCost(0), 60);
+      expect(GameBalance.menuUpgradeCost(1), 105);
+      expect(GameBalance.menuUpgradeCost(10), 12100);
+      expect(
+        GameBalance.operationUpgradeCost(
+          baseCost: 90,
+          currentLevel: 2,
+          eventMultiplier: 0.9,
+        ),
+        150,
+      );
+      expect(GameBalance.menuUpgradeCost(1, eventMultiplier: 0.9), 95);
+    });
+
+    test('stages offline efficiency and duration by restaurant level', () {
+      expect(GameBalance.offlineMinuteCap(1), 60);
+      expect(GameBalance.offlineMinuteCap(3), 120);
+      expect(GameBalance.offlineMinuteCap(5), 240);
+      expect(GameBalance.offlineMinuteCap(8), 360);
+      expect(GameBalance.offlineMinuteCap(10), 480);
+      expect(GameBalance.offlineEfficiency(1), 0.08);
+      expect(GameBalance.offlineEfficiency(5), 0.12);
+      expect(GameBalance.offlineEfficiency(10), 0.15);
+      expect(
+        GameBalance.offlineEarnings(
+          baselineRevenuePerMinute: 100,
+          elapsedMinutes: 480,
+          restaurantLevel: 1,
+        ),
+        480,
+      );
+      expect(
+        GameBalance.offlineEarnings(
+          baselineRevenuePerMinute: 100,
+          elapsedMinutes: 480,
+          restaurantLevel: 3,
+        ),
+        1200,
+      );
+      expect(
+        GameBalance.offlineEarnings(
+          baselineRevenuePerMinute: 100,
+          elapsedMinutes: 480,
+          restaurantLevel: 10,
+        ),
+        7200,
+      );
+    });
+
+    test('caps kitchen and checkout processing at one order per second', () {
+      expect(GameBalance.kitchenOrdersPerMinute(100), 60);
+      expect(GameBalance.checkoutOrdersPerMinute(100), 60);
     });
 
     test('formats compact numbers without redundant decimals', () {

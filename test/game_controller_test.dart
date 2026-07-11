@@ -240,16 +240,16 @@ void main() {
         closeTo(seats.autoOrdersPerMinute, 0.001),
       );
       expect(
-        kitchen.recommendedOperationUpgradeType,
-        GameOperationUpgradeType.kitchen,
-      );
-      expect(
-        checkout.recommendedOperationUpgradeType,
-        GameOperationUpgradeType.service,
-      );
-      expect(
-        seats.recommendedOperationUpgradeType,
-        GameOperationUpgradeType.seats,
+        {
+          balanced.recommendedOperationUpgradeType,
+          kitchen.recommendedOperationUpgradeType,
+          dining.recommendedOperationUpgradeType,
+          checkout.recommendedOperationUpgradeType,
+          seats.recommendedOperationUpgradeType,
+        },
+        hasLength(1),
+        reason:
+            'live dining phases must not change the long-term recommendation',
       );
     });
 
@@ -310,14 +310,23 @@ void main() {
       );
       expect(
         kitchen.upgradedOrdersPerMinute,
-        closeTo(kitchen.currentOrdersPerMinute, 0.001),
+        greaterThan(kitchen.currentOrdersPerMinute),
       );
       expect(
         service.upgradedOrdersPerMinute,
         greaterThan(service.currentOrdersPerMinute),
       );
-      expect(service.isRecommended, isTrue);
+      expect(seats.isRecommended, isTrue);
       expect(previews.where((preview) => preview.isRecommended), hasLength(1));
+      final recommended = game.recommendedOperationUpgradePreview!;
+      for (final preview in previews.where(
+        (preview) => preview.coinsPerMinuteGain > 0,
+      )) {
+        expect(
+          recommended.paybackMinutes!,
+          lessThanOrEqualTo(preview.paybackMinutes!),
+        );
+      }
 
       expect(game.coins, coinsBefore);
       expect(
@@ -326,6 +335,26 @@ void main() {
       );
       expect(game.unlockedFoodIds, unlockedBefore);
       expect(game.lastSavedAt, savedAtBefore);
+    });
+
+    test('temporary upgrade discounts do not change the recommendation',
+        () async {
+      final now = DateTime(2026, 1, 1, 12);
+      final baseline = GameController(storage: MemoryGameStorage());
+      final discounted = GameController(
+        storage: MemoryGameStorage({
+          'idle_customer_orders_served': 11,
+        }),
+      );
+      await baseline.load(now: now);
+      await discounted.load(now: now);
+
+      expect(discounted.activeEventType, GameEventType.ingredientDiscount);
+      expect(discounted.seatUpgradeCost, lessThan(baseline.seatUpgradeCost));
+      expect(
+        discounted.recommendedOperationUpgradeType,
+        baseline.recommendedOperationUpgradeType,
+      );
     });
 
     test('business display ratios reflect loaded automatic dining state',
@@ -363,7 +392,7 @@ void main() {
 
       expect(
         resumed.pendingOfflineEarnings,
-        resumed.revenuePerMinute * 30,
+        resumed.baselineRevenuePerMinute * 30 * resumed.offlineEfficiency,
       );
     });
 
@@ -379,7 +408,63 @@ void main() {
 
       expect(
         resumed.pendingOfflineEarnings,
-        resumed.revenuePerMinute * GameController.maxOfflineMinutes,
+        resumed.baselineRevenuePerMinute *
+            resumed.offlineMinuteCap *
+            resumed.offlineEfficiency,
+      );
+      expect(resumed.offlineMinuteCap, 60);
+    });
+
+    test('unlocks the full offline window at restaurant level ten', () async {
+      final storage = MemoryGameStorage({
+        'idle_seat_level': 10,
+        'idle_service_level': 10,
+        'idle_kitchen_level': 10,
+        'idle_restaurant_xp': 900,
+      });
+      final start = DateTime(2026, 1, 1, 12);
+      final firstSession = GameController(storage: storage);
+      await firstSession.load(now: start);
+      await firstSession.save(now: start);
+
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: start.add(const Duration(hours: 12)));
+
+      expect(resumed.restaurantLevel, greaterThanOrEqualTo(10));
+      expect(resumed.offlineMinuteCap, GameController.maxOfflineMinutes);
+      expect(resumed.offlineEfficiency, 0.15);
+      expect(
+        resumed.pendingOfflineEarnings,
+        closeTo(resumed.baselineRevenuePerMinute * 480 * 0.15, 0.001),
+      );
+    });
+
+    test('offline earnings ignore the event active when the game was saved',
+        () async {
+      final storage = MemoryGameStorage({
+        'idle_customer_orders_served': 8,
+      });
+      final start = DateTime(2026, 1, 1, 12);
+      final firstSession = GameController(storage: storage);
+      await firstSession.load(now: start);
+      expect(firstSession.activeEventType, GameEventType.regularVisit);
+      expect(
+        firstSession.revenuePerMinute,
+        greaterThan(firstSession.baselineRevenuePerMinute),
+      );
+      await firstSession.save(now: start);
+
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: start.add(const Duration(hours: 8)));
+
+      expect(
+        resumed.pendingOfflineEarnings,
+        closeTo(
+          resumed.baselineRevenuePerMinute *
+              resumed.offlineMinuteCap *
+              resumed.offlineEfficiency,
+          0.001,
+        ),
       );
     });
 
@@ -457,12 +542,78 @@ void main() {
       expect(game.lifetimeEarnings, pending);
     });
 
-    test('delayed business ticks convert unsimulated time into idle income',
+    test('predicted throughput tracks the detailed dining simulation',
         () async {
       final game = GameController(storage: MemoryGameStorage());
       final start = DateTime(2026, 1, 1, 12);
       await game.load(now: start);
-      final passiveRate = game.revenuePerMinute;
+      var predictedOrders = 0.0;
+      var completedOrders = 0;
+
+      for (var second = 1; second <= 30 * 60; second += 1) {
+        predictedOrders += game.autoOrdersPerMinute / 60;
+        completedOrders += await game.simulateBusinessTick(
+          const [1, 2, 3, 4, 5],
+          elapsed: const Duration(seconds: 1),
+          now: start.add(Duration(seconds: second)),
+        );
+      }
+
+      final relativeError =
+          (completedOrders - predictedOrders).abs() / predictedOrders;
+      expect(
+        relativeError,
+        lessThan(0.05),
+        reason:
+            'predicted ${predictedOrders.toStringAsFixed(1)} orders, simulated $completedOrders',
+      );
+    });
+
+    test('predicted throughput tracks a level-ten dining simulation', () async {
+      final game = GameController(
+        storage: MemoryGameStorage({
+          'idle_seat_level': 10,
+          'idle_service_level': 10,
+          'idle_kitchen_level': 10,
+          'idle_restaurant_xp': 900,
+        }),
+      );
+      final start = DateTime(2026, 1, 1, 12);
+      await game.load(now: start);
+      var predictedOrders = 0.0;
+      var completedOrders = 0;
+
+      for (var second = 1; second <= 30 * 60; second += 1) {
+        predictedOrders += game.baselineAutoOrdersPerMinute / 60;
+        completedOrders += await game.simulateBusinessTick(
+          const [1, 2, 3, 4, 5, 6, 7, 8, 9],
+          elapsed: const Duration(seconds: 1),
+          now: start.add(Duration(seconds: second)),
+        );
+      }
+
+      final relativeError =
+          (completedOrders - predictedOrders).abs() / predictedOrders;
+      expect(
+        relativeError,
+        lessThan(0.05),
+        reason:
+            'predicted ${predictedOrders.toStringAsFixed(1)} orders, simulated $completedOrders',
+      );
+    });
+
+    test('delayed business ticks use the full baseline offline policy',
+        () async {
+      final game = GameController(
+        storage: MemoryGameStorage({
+          'idle_customer_orders_served': 8,
+        }),
+      );
+      final start = DateTime(2026, 1, 1, 12);
+      await game.load(now: start);
+      final passiveRate = game.baselineRevenuePerMinute;
+      expect(game.activeEventType, GameEventType.regularVisit);
+      expect(game.revenuePerMinute, greaterThan(passiveRate));
 
       await game.simulateBusinessTick(
         [1, 2, 3],
@@ -472,10 +623,38 @@ void main() {
 
       expect(
         game.pendingOfflineEarnings,
-        closeTo(passiveRate * 8, 0.001),
+        closeTo(passiveRate * 10 * game.offlineEfficiency, 0.001),
       );
-      expect(game.pendingBusinessEarnings, greaterThan(0));
+      expect(game.pendingBusinessEarnings, 0);
       expect(game.lastSavedAt, start.add(const Duration(minutes: 10)));
+    });
+
+    test('background resume and closed-app reload earn the same amount',
+        () async {
+      final start = DateTime(2026, 1, 1, 12);
+      const elapsed = Duration(seconds: 121);
+      final closedStorage = MemoryGameStorage();
+      final closedSession = GameController(storage: closedStorage);
+      await closedSession.load(now: start);
+      await closedSession.save(now: start);
+
+      final reopened = GameController(storage: closedStorage);
+      await reopened.load(now: start.add(elapsed));
+
+      final background = GameController(storage: MemoryGameStorage());
+      await background.load(now: start);
+      await background.simulateBusinessTick(
+        const [1, 2, 3],
+        elapsed: elapsed,
+        now: start.add(elapsed),
+      );
+
+      expect(
+        background.pendingOfflineEarnings,
+        closeTo(reopened.pendingOfflineEarnings, 0.001),
+      );
+      expect(background.pendingBusinessEarnings, 0);
+      expect(background.customerOrdersServed, 0);
     });
 
     test('automatic business creates real visible activity quickly', () async {
@@ -818,6 +997,30 @@ void main() {
       );
     });
 
+    test('fractional automatic work survives snapshot reloads', () async {
+      final storage = MemoryGameStorage();
+      final start = DateTime(2026, 1, 1, 12);
+      final firstSession = GameController(storage: storage);
+      await firstSession.load(now: start);
+
+      await firstSession.simulateBusinessTick(
+        const [1],
+        elapsed: const Duration(seconds: 4),
+        now: start.add(const Duration(seconds: 4)),
+      );
+      expect(firstSession.businessSeatedCount, 0);
+
+      final resumed = GameController(storage: storage);
+      await resumed.load(now: start.add(const Duration(seconds: 4)));
+      await resumed.simulateBusinessTick(
+        const [1],
+        elapsed: const Duration(seconds: 1),
+        now: start.add(const Duration(seconds: 5)),
+      );
+
+      expect(resumed.businessSeatedCount, 1);
+    });
+
     test('milestones become claimable and cannot be claimed twice', () async {
       final game = GameController(storage: MemoryGameStorage());
       final start = DateTime(2026, 1, 1, 12);
@@ -851,6 +1054,29 @@ void main() {
       );
       expect(game.claimedMilestoneIds, contains(firstService.id));
       expect(await game.claimMilestone(firstService.id), 0);
+    });
+
+    test('next milestone prioritizes claimable then closest progress',
+        () async {
+      final start = DateTime(2026, 1, 1, 12);
+      final fresh = GameController(storage: MemoryGameStorage());
+      await fresh.load(now: start);
+      expect(fresh.nextMilestone?.id, 'first_service');
+
+      expect(await fresh.upgradeSeats(), isTrue);
+      expect(fresh.nextMilestone?.id, 'better_seats');
+      expect(fresh.nextMilestone?.claimable, isTrue);
+
+      final progressed = GameController(
+        storage: MemoryGameStorage({
+          'idle_customer_orders_served': 4,
+          'idle_claimed_milestone_ids': jsonEncode(['first_service']),
+        }),
+      );
+      await progressed.load(now: start);
+
+      expect(progressed.nextMilestone?.id, 'busy_shift');
+      expect(progressed.nextMilestone?.progressRatio, 0.8);
     });
 
     test('claimed milestones survive reloads', () async {
